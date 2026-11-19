@@ -1,6 +1,6 @@
 <img src="docs/app-icon.png" width="96" align="right" alt="App icon">
 
-# I-5 Express
+# I-5 Express for Mac Menu Bar
 
 A macOS menu bar app that shows which way Seattle's I-5 express lanes are running right now, and whether they're open at all.
 
@@ -52,7 +52,13 @@ Turn on **Notify when lanes change** in the gear menu to get:
 - an alert when the lanes switch direction, open or close;
 - an alert when the app goes from confirmed to "can't confirm", with the reason.
 
-To keep alerts useful, the app skips the 15-minute weekday switchover gap and any change that happened while your Mac was asleep.
+To keep alerts useful, the app skips:
+
+- the 15-minute weekday switchover gap;
+- any change that happened while your Mac was asleep;
+- data that's only old, like when you're offline or just woke the Mac. The menu bar still shows it.
+
+A "can't confirm" alert also waits until the lanes are scheduled to open. So a Thanksgiving alert comes at 5 AM, not midnight.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/notifications-dark.png">

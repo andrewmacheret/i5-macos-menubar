@@ -96,6 +96,47 @@ let defaultSchedule = """
         #expect(a?.isOver(before: day(2026, 12, 25)) == false)
     }
 
+    @Test func asOfNoticeHasNoEnd() {
+        // Still on the page means still in effect, even days later
+        let html = page(schedule: "<p>As of 4 p.m. Monday, Nov. 16, the express lanes are closed for emergency panel repair.</p>" + defaultSchedule)
+        #expect(Parser.parse(html: html, now: now).advisories.first?.days == DayRange(first: day(2026, 11, 16), last: nil))
+    }
+
+    @Test func readsDateRanges() {
+        #expect(Dates.all(in: "Weekend closure, Dec. 4-7", near: now) == [day(2026, 12, 4), day(2026, 12, 7)])
+        #expect(Dates.all(in: "Dec. 4 – 7", near: now) == [day(2026, 12, 4), day(2026, 12, 7)])
+        // A time after a dash isn't a date
+        #expect(Dates.all(in: "Monday, Nov. 16 - 4 p.m.", near: now) == [day(2026, 11, 16)])
+        #expect(Dates.all(in: "Nov. 16 - 4:30", near: now) == [day(2026, 11, 16)])
+    }
+
+    @Test func dateFirstClosure() throws {
+        let html = page(special: "<h3>Weekend closure</h3><p>Closed from Friday, Jan. 8 at 11 p.m. to Monday, Jan. 11 at 5 a.m.</p>")
+        let c = try #require(Parser.parse(html: html, now: now).events.first?.closure)
+        #expect(c.start == seattle(2027, 1, 8, 23))
+        #expect(c.end == seattle(2027, 1, 11, 5))
+    }
+
+    @Test func readsEveryClosureInAnEvent() {
+        let html = page(special: "<h3>Weekend closures</h3><p>Closed 11 p.m. Friday, Dec. 4 to 4 a.m. Monday, Dec. 7, "
+            + "and again 11 p.m. Friday, Dec. 11 to 4 a.m. Monday, Dec. 14.</p>")
+        let events = Parser.parse(html: html, now: now).events
+        #expect(events.compactMap(\.closure?.start) == [seattle(2026, 12, 4, 23), seattle(2026, 12, 11, 23)])
+        #expect(events.count == 2)
+    }
+
+    @Test func flagsDatesNoClosureCovers() throws {
+        let html = page(special: "<h3>Weekend closures</h3><p>Closed 11 p.m. Friday, Dec. 4 to 4 a.m. Monday, Dec. 7. "
+            + "Another closure is planned Dec. 18-21.</p>")
+        let events = Parser.parse(html: html, now: now).events
+        #expect(events.count == 2)
+        let loose = try #require(events.first { $0.closure == nil })
+        #expect(loose.days == DayRange(first: day(2026, 12, 18), last: day(2026, 12, 21)))
+        let during = seattle(2026, 12, 19, 10)
+        let r = FetchResult(info: Parser.parse(html: html, now: during), source: .live(during))
+        #expect(Trust.assess(r, now: during).verdict == .uncertain)
+    }
+
     @Test func flagsUnknownPageParts() {
         let html = page(schedule: defaultSchedule + "<h3>Holidays</h3><ul><li>Southbound only, all day</li></ul>")
         let info = Parser.parse(html: html, now: now)

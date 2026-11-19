@@ -45,8 +45,7 @@ final class Store: ObservableObject {
     private var tickTimer: Timer?
     private var refreshTimer: Timer?
     private var wakeObserver: NSObjectProtocol?
-    private var lastTick = Date()
-    private var lastCheck: Assessment?
+    private var lastSeen: Alerts.Seen?
 
     /// Notifications and login items need a real .app bundle
     private let isBundled = Bundle.main.bundleIdentifier != nil
@@ -59,7 +58,6 @@ final class Store: ObservableObject {
         showCountdown = defaults.object(forKey: "showCountdown") as? Bool ?? false
         notifyOnChange = defaults.bool(forKey: "notifyOnChange")
         launchAtLogin = false
-        lastCheck = snapshot.check
         syncLaunchAtLogin()
     }
 
@@ -100,13 +98,13 @@ final class Store: ObservableObject {
     }
 
     func tick() {
-        let now = Date()
-        // A big gap means the Mac was asleep
-        let slept = now.timeIntervalSince(lastTick) > 120
-        lastTick = now
-        snapshot = Store.makeSnapshot(result, now: now, refreshing: isRefreshing)
-        if let lastCheck { notifyIfNeeded(from: lastCheck, to: snapshot, slept: slept) }
-        lastCheck = snapshot.check
+        snapshot = Store.makeSnapshot(result, now: Date(), refreshing: isRefreshing)
+        let check = snapshot.check
+        if notifyOnChange, isBundled,
+           let m = Alerts.decide(lastSeen, check: check, next: snapshot.next, now: snapshot.now) {
+            send(m.title, m.body)
+        }
+        if !Alerts.waiting(check) { lastSeen = Alerts.seen(check, next: snapshot.next) }
     }
 
     var engine: Engine { Engine(info: result.info) }
@@ -139,41 +137,6 @@ final class Store: ObservableObject {
     }
 
     // MARK: Notifications
-
-    private func notifyIfNeeded(from old: Assessment, to snap: Snapshot, slept: Bool) {
-        guard notifyOnChange, isBundled else { return }
-        let new = snap.check
-
-        if old.verdict == .confident, new.verdict == .uncertain {
-            let n = Store.cantConfirmMessage(new)
-            send(n.title, n.body)
-            return
-        }
-        guard old.verdict == .confident, new.verdict == .confident, old.scheduled != new.scheduled else { return }
-        // Don't report a change that happened while the Mac was asleep
-        if slept { return }
-        // Skip short gaps like the 15 minute weekday switchover
-        if new.scheduled == .closed, let next = snap.next, next.date.timeIntervalSince(snap.now) < 30 * 60 { return }
-
-        let n = Store.changeMessage(new.scheduled, next: snap.next, now: snap.now)
-        send(n.title, n.body)
-    }
-
-    static func changeMessage(_ status: LaneStatus, next: Change?, now: Date) -> (title: String, body: String) {
-        let title = status == .closed ? "I-5 express lanes closed" : "I-5 express lanes now \(status.title.lowercased())"
-        guard let next else { return (title, "") }
-        let when = Format.when(next.date, now: now)
-        let body = switch (status, next.to) {
-        case (_, .closed): "Closes at \(when)"
-        case (.closed, let to): "Opens \(to.title.lowercased()) at \(when)"
-        case (_, let to): "Switches \(to.title.lowercased()) at \(when)"
-        }
-        return (title, body)
-    }
-
-    static func cantConfirmMessage(_ check: Assessment) -> (title: String, body: String) {
-        ("Can't confirm the I-5 express lanes", check.concerns.first?.title ?? "Open the app for details")
-    }
 
     private func send(_ title: String, _ body: String) {
         let content = UNMutableNotificationContent()

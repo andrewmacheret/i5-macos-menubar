@@ -36,6 +36,8 @@ public enum Trust {
     /// Data older than this is treated as stale
     public static let maxAge: TimeInterval = 2 * 60 * 60
 
+    private static let clockSlack: TimeInterval = 5 * 60
+
     /// `refreshing` means a download is in flight, so old data shows as "checking"
     /// for a moment instead of a warning.
     public static func assess(_ result: FetchResult, now: Date, refreshing: Bool = false) -> Assessment {
@@ -66,6 +68,11 @@ public enum Trust {
             if now.timeIntervalSince(d) > maxAge {
                 out.append(Concern("Data is \(Format.countdown(to: now, from: d)) old",
                                    "Last read WSDOT's page at \(Format.when(d, now: now)). The app keeps retrying.",
+                                   link: Sources.expressLanes, fixedByRefresh: true))
+            } else if d.timeIntervalSince(now) > clockSlack {
+                // The Mac's clock went backwards, so the data's age is unknown
+                out.append(Concern("The Mac's clock changed",
+                                   "WSDOT's page was read at a time that hasn't happened yet. The app will read it again.",
                                    link: Sources.expressLanes, fixedByRefresh: true))
             }
         }

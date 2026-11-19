@@ -70,6 +70,70 @@ import Testing
         #expect(Trust.assess(r, now: now, refreshing: true).verdict == .uncertain)
     }
 
+    @Test func futureFetchTimeIsNotTrusted() throws {
+        // The clock was set back after the page was read
+        let r = FetchResult(info: Parser.parse(html: try fixture(), now: now), source: .cached(now.addingTimeInterval(3600)))
+        #expect(Trust.assess(r, now: now).verdict == .uncertain)
+        #expect(Trust.assess(r, now: now, refreshing: true).verdict == .checking)
+    }
+
+    struct Offline: Error {}
+
+    func tempDir() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("i5-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func fetcher(_ dir: URL, _ html: String) -> Fetcher {
+        Fetcher(cacheDir: dir) { Data(html.utf8) }
+    }
+
+    func offline(_ dir: URL) -> Fetcher {
+        Fetcher(cacheDir: dir) { throw Offline() }
+    }
+
+    @Test func fetcherKeepsLastGoodCopy() async throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let good = await fetcher(dir, try fixture()).load(now: now)
+        #expect(good.source == .live(now))
+
+        // The network fails, so the saved copy is used
+        let down = await offline(dir).load(now: now.addingTimeInterval(60))
+        #expect(down.source == .cached(now))
+        #expect(down.error != nil)
+
+        // The page changes into something unreadable. Keep the old copy and say so.
+        let changed = await fetcher(dir, "<html>new site</html>").load(now: now.addingTimeInterval(120))
+        #expect(changed.source == .cached(now))
+        #expect(changed.pageChanged)
+        #expect(changed.info.scheduleFromPage)
+    }
+
+    @Test func fetcherRemembersChangedPage() async throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let html = try fixture()
+        _ = await fetcher(dir, html).load(now: now)
+        _ = await fetcher(dir, "<html>new site</html>").load(now: now.addingTimeInterval(60))
+
+        // After a restart, and after a failed download, the problem is still there
+        #expect(fetcher(dir, html).cachedOrBuiltIn(now: now.addingTimeInterval(120)).pageChanged)
+        let later = now.addingTimeInterval(180)
+        let down = await offline(dir).load(now: later)
+        #expect(down.pageChanged)
+        #expect(Trust.assess(down, now: later).verdict == .uncertain)
+
+        // A good page clears it
+        #expect(await !fetcher(dir, html).load(now: now.addingTimeInterval(240)).pageChanged)
+        #expect(!fetcher(dir, html).cachedOrBuiltIn(now: now.addingTimeInterval(300)).pageChanged)
+    }
+
+    @Test func fetcherWithNothingSavedUsesBuiltIn() async {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(await offline(dir).load(now: now).source == .builtIn)
+    }
+
     @Test func unknownPagePartsBlockConfidence() {
         let html = page(schedule: defaultSchedule + "<h3>Holidays</h3><ul><li>Southbound only</li></ul>")
         #expect(Trust.assess(live(html), now: now).verdict == .uncertain)

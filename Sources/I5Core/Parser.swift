@@ -25,16 +25,32 @@ public enum Parser {
         var pendingEvent: SpecialEvent?
 
         func flushEvent() {
-            guard var e = pendingEvent else { return }
-            let text = e.title + " " + e.detail
-            e.closure = closure(from: e, now: now)
-            if let c = e.closure {
-                e.days = DayRange(first: Seattle.day(of: c.start), last: Seattle.day(of: c.end))
-            } else {
-                e.days = range(in: text, now: now)
-            }
-            events.append(e)
+            guard let e = pendingEvent else { return }
             pendingEvent = nil
+            let text = e.title + " " + e.detail
+            let found = closures(from: e, now: now)
+            if found.isEmpty {
+                var plain = e
+                plain.days = range(in: text, now: now)
+                events.append(plain)
+                return
+            }
+            var spans: [DayRange] = []
+            for c in found {
+                let span = DayRange(first: Seattle.day(of: c.start), last: Seattle.day(of: c.end))
+                spans.append(span)
+                var one = e
+                one.closure = c
+                one.days = span
+                events.append(one)
+            }
+            // A date the closures don't cover may be another closure the app couldn't read
+            let loose = Dates.all(in: text, near: now).filter { d in !spans.contains { $0.contains(d) } }
+            if let first = loose.min(), let last = loose.max() {
+                var rest = e
+                rest.days = DayRange(first: first, last: last)
+                events.append(rest)
+            }
         }
 
         for b in blocks {
@@ -124,8 +140,10 @@ public enum Parser {
     static func range(in text: String, now: Date) -> DayRange? {
         let days = Dates.all(in: text, near: now)
         guard let first = days.min(), let last = days.max() else { return nil }
-        let openEnded = text.range(of: #"further notice|indefinite|until repairs|until it is safe"#, options: [.regularExpression, .caseInsensitive]) != nil
-        return DayRange(first: first, last: openEnded ? nil : last)
+        let untilNotice = text.range(of: #"further notice|indefinite|until repairs|until it is safe"#, options: [.regularExpression, .caseInsensitive]) != nil
+        // "As of Nov. 16, the lanes are closed" has a start but no end
+        let startsOnly = first == last && text.range(of: #"\b(as of|beginning|starting|effective|since)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        return DayRange(first: first, last: untilNotice || startsOnly ? nil : last)
     }
 
     /// "Southbound - 5 a.m. to 11 a.m." or "Northbound - 1:45 to 11 p.m."
@@ -151,10 +169,10 @@ public enum Parser {
         return LaneWindow(status, start.time, endTime)
     }
 
-    /// Finds "11 p.m. Friday, Dec. 4 to 4 a.m. Monday, Dec. 7" style ranges.
-    static func closure(from event: SpecialEvent, now: Date) -> Closure? {
+    /// Every "11 p.m. Friday, Dec. 4 to 4 a.m. Monday, Dec. 7" style range in an event, like two weekends in one notice.
+    static func closures(from event: SpecialEvent, now: Date) -> [Closure] {
         // Only trust headings that say closure, so lane reductions don't count
-        guard event.title.lowercased().contains("clos") else { return nil }
+        guard event.title.lowercased().contains("clos") else { return [] }
 
         let time = #"(\d{1,2}(?::\d{2})?\s*[ap]\.?\s?m\.?|noon|midnight)"#
         let day = #"(?:[A-Za-z]+day,?\s+)?"#
@@ -165,14 +183,15 @@ public enum Parser {
         // "Friday, Dec. 4 at 11 p.m. to Monday, Dec. 7 at 4 a.m."
         let dateFirst = day + date + #",?\s+at\s+"# + time + sep + day + date + #",?\s+at\s+"# + time
 
-        if let g = Regex.groups(timeFirst, in: event.detail) {
-            return make(event.title, g[1], g[0], g[3], g[2], now)
+        let found = Regex.allMatches(timeFirst, in: event.detail).compactMap { g in
+            make(event.title, g[2], g[1], g[4], g[3], now)
+        } + Regex.allMatches(dateFirst, in: event.detail).compactMap { g in
+            make(event.title, g[1], g[2], g[3], g[4], now)
         }
-        if let g = Regex.groups(dateFirst, in: event.detail) {
-            return make(event.title, g[0], g[1], g[2], g[3], now)
-        }
-        // No exact times. Don't guess, Trust flags those days instead.
-        return nil
+        // No exact times means an empty list. Don't guess, Trust flags those days instead.
+        var unique: [Closure] = []
+        for c in found where !unique.contains(c) { unique.append(c) }
+        return unique.sorted { $0.start < $1.start }
     }
 
     private static func make(_ title: String, _ d1: String, _ t1: String, _ d2: String, _ t2: String, _ now: Date) -> Closure? {
@@ -234,6 +253,7 @@ enum Times {
               var hour = Int(g[0]), hour <= 12
         else { return nil }
         let minute = Int(g[1]) ?? 0
+        guard minute <= 59 else { return nil }
         let marker = g[2]
         let explicit = !marker.isEmpty
         let pm = explicit ? marker.hasPrefix("p") : (defaultPM ?? false)
@@ -257,18 +277,26 @@ enum Times {
 enum Dates {
     private static let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 
+    // "Dec. 4-7" also counts the 7, but "Nov. 16 - 4 p.m." doesn't count the 4
+    private static let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})\b"#
+        + #"(?:\s*[-–]\s*(\d{1,2})\b(?!\s*(?::|[ap]\.?\s?m\b|\d)))?"#
+
     /// Finds dates like "Nov. 16" or "December 4" and picks the year closest to `now`.
     static func all(in text: String, near now: Date) -> [DayKey] {
-        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})\b"#
         let today = Seattle.day(of: now)
-        return Regex.allMatches(pattern, in: text).compactMap { g in
-            guard let mi = months.firstIndex(of: g[1].lowercased().prefix(3).description),
-                  let d = Int(g[2]), (1...31).contains(d)
-            else { return nil }
+        func date(_ month: Int, _ d: String) -> DayKey? {
+            guard let d = Int(d), (1...31).contains(d) else { return nil }
             let candidates = [today.year - 1, today.year, today.year + 1].map {
-                DayKey(year: $0, month: mi + 1, day: d)
+                DayKey(year: $0, month: month, day: d)
             }
             return candidates.min { abs(Seattle.daysBetween(today, $0)) < abs(Seattle.daysBetween(today, $1)) }
+        }
+        return Regex.allMatches(pattern, in: text).flatMap { g -> [DayKey] in
+            guard let mi = months.firstIndex(of: g[1].lowercased().prefix(3).description),
+                  let first = date(mi + 1, g[2])
+            else { return [] }
+            guard let last = date(mi + 1, g[3]), first < last else { return [first] }
+            return [first, last]
         }
     }
 }

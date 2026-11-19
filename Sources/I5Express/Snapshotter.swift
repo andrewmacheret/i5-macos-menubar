@@ -55,8 +55,8 @@ enum Snapshotter {
         let tenAM = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(10, 8))!
         let quarterPast = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(11, 15))!
         let elevenPM = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(23))!
-        let change = Store.changeMessage(.northbound, next: Change(date: elevenPM, to: .closed), now: quarterPast)
-        let cantConfirm = Store.cantConfirmMessage(scenarios[1].1.snapshot.check)
+        let change = Alerts.change(.northbound, next: Change(date: elevenPM, to: .closed), now: quarterPast)
+        let cantConfirm = Alerts.cantConfirm(scenarios[1].1.snapshot.check)
 
         let extras: [(String, AnyView)] = [
             ("icons", AnyView(IconStates())),
@@ -151,7 +151,7 @@ enum Snapshotter {
 
     /// Banners laid out like macOS notifications, using the app's real messages
     private struct NotificationPreview: View {
-        let messages: [(title: String, body: String)]
+        let messages: [Alerts.Message]
         @Environment(\.colorScheme) private var scheme
 
         var body: some View {
