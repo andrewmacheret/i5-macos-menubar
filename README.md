@@ -105,6 +105,14 @@ It can't know about a closure WSDOT hasn't posted yet, like an emergency repair 
 
 You need macOS 14 or later. It runs on Apple silicon and Intel Macs.
 
+### Homebrew
+
+```bash
+brew install --cask andrewmacheret/tap/i5-express
+```
+
+Then open **I-5 Express** from Applications. The cask clears macOS's download flag, so you skip the Open Anyway step below. See the [tap](https://github.com/andrewmacheret/homebrew-tap) for why. The app updates itself, so `brew upgrade` leaves it alone.
+
 ### Download
 
 1. Download the `.dmg` from the [latest release](https://github.com/andrewmacheret/i5-macos-menubar/releases/latest).
