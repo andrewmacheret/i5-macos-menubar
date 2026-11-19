@@ -1,15 +1,21 @@
 APP_NAME := I-5 Express
 APP := build/$(APP_NAME).app
+DMG := build/I-5-Express.dmg
 INSTALL_DIR := $(HOME)/Applications
+VERSION ?= 1.0
+BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
+# UNIVERSAL=1 builds for both Apple silicon and Intel Macs. It needs full Xcode.
+ARCHS := $(if $(UNIVERSAL),--arch arm64 --arch x86_64)
 # The Command Line Tools ship the Swift Testing macros outside the default search path.
 # Full Xcode finds them by itself, so only add the flag for the Command Line Tools.
 TESTING_PLUGINS := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 TEST_FLAGS := $(if $(findstring CommandLineTools,$(shell xcode-select -p)),-Xswiftc -plugin-path -Xswiftc $(TESTING_PLUGINS))
 
-.PHONY: help app run install uninstall test status screenshots clean
+.PHONY: help app dmg run install uninstall test status screenshots clean
 
 help:
 	@echo "make app        Build build/$(APP_NAME).app"
+	@echo "make dmg        Build $(DMG) for sharing"
 	@echo "make run        Build and open the app"
 	@echo "make install    Copy the app to ~/Applications and open it"
 	@echo "make uninstall  Quit and remove it from ~/Applications"
@@ -18,16 +24,27 @@ help:
 	@echo "make screenshots  Regenerate the images in docs/"
 
 app:
-	swift build -c release --product I5Express
+	swift build -c release --product I5Express $(ARCHS)
 	rm -rf "$(APP)"
 	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
-	cp "$$(swift build -c release --show-bin-path)/I5Express" "$(APP)/Contents/MacOS/"
+	cp "$$(swift build -c release $(ARCHS) --show-bin-path)/I5Express" "$(APP)/Contents/MacOS/"
 	cp Resources/Info.plist "$(APP)/Contents/"
+	plutil -replace CFBundleShortVersionString -string "$(VERSION)" "$(APP)/Contents/Info.plist"
+	plutil -replace CFBundleVersion -string "$(BUILD_NUMBER)" "$(APP)/Contents/Info.plist"
 	rm -rf build/AppIcon.iconset
 	swift scripts/make_icon.swift build/AppIcon.iconset
 	iconutil -c icns build/AppIcon.iconset -o "$(APP)/Contents/Resources/AppIcon.icns"
 	codesign --force --sign - "$(APP)"
 	@echo "Built $(APP)"
+
+# The Applications shortcut lets people drag the app straight in
+dmg: app
+	rm -rf build/dmg "$(DMG)"
+	mkdir -p build/dmg
+	cp -R "$(APP)" build/dmg/
+	ln -s /Applications build/dmg/Applications
+	hdiutil create -volname "$(APP_NAME)" -srcfolder build/dmg -fs HFS+ -format UDZO -ov "$(DMG)"
+	@echo "Built $(DMG)"
 
 run: app
 	-pkill -x I5Express

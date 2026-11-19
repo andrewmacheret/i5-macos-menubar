@@ -97,7 +97,21 @@ It can't know about a closure WSDOT hasn't posted yet, like an emergency repair 
 
 ## Install
 
-You need macOS 14 or later and the Xcode Command Line Tools (`xcode-select --install`). Full Xcode isn't required.
+You need macOS 14 or later. It runs on Apple silicon and Intel Macs.
+
+### Download
+
+1. Download the `.dmg` from the [latest release](https://github.com/andrewmacheret/i5-macos-menubar/releases/latest).
+2. Open it and drag **I-5 Express** into **Applications**.
+3. Open I-5 Express from Applications. macOS says it can't check the app for malware, since the app isn't signed with an Apple developer certificate. Click **Done**.
+4. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the I-5 Express message. Enter your password.
+5. Open the app again. If macOS asks once more, click **Open Anyway**. The N or S badge shows up in the menu bar.
+
+You only do steps 3 to 5 once per version.
+
+### Build it yourself
+
+You need the Xcode Command Line Tools (`xcode-select --install`). Full Xcode isn't required.
 
 ```bash
 git clone https://github.com/andrewmacheret/i5-macos-menubar.git
@@ -105,9 +119,18 @@ cd i5-macos-menubar
 make install
 ```
 
-This builds `I-5 Express.app`, copies it to `~/Applications` and opens it.
+This builds `I-5 Express.app`, copies it to `~/Applications` and opens it. A build you make yourself skips the Open Anyway step, since macOS only checks downloaded apps.
 
-The app is signed locally, not with a developer certificate. So macOS may ask you to approve notifications or launch at login again after each rebuild.
+The app is signed locally, not with a developer certificate. So macOS may ask you to approve notifications or launch at login again after each new version.
+
+### Releases
+
+GitHub Actions tests every push and builds a DMG for both Apple silicon and Intel, saved as a download on the run. Pushing a tag like `v1.0.0` also publishes the DMG as a release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Terminal
 
@@ -131,6 +154,7 @@ It exits with code `0` when the status is confirmed and `2` when it isn't, so sc
 | Command | What it does |
 | --- | --- |
 | `make app` | Build `build/I-5 Express.app` |
+| `make dmg` | Build `build/I-5-Express.dmg` for sharing. Add `UNIVERSAL=1` for Intel too (needs full Xcode) |
 | `make run` | Build and open the app from `build/` |
 | `make install` | Build, copy to `~/Applications` and open |
 | `make uninstall` | Quit the app and remove it |

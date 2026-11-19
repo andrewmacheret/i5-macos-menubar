@@ -1,0 +1,54 @@
+# Tests every push and builds the DMG, saved as a download on the run.
+# A tag like v1.0.0 also publishes the DMG as a release.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The build number is the commit count, so it needs the full history
+          fetch-depth: 0
+
+      - name: Test
+        run: make test
+
+      - name: Build DMG
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export VERSION="${GITHUB_REF_NAME#v}"
+            NAME="I-5-Express-$GITHUB_REF_NAME.dmg"
+          else
+            NAME="I-5-Express-${GITHUB_SHA::7}.dmg"
+          fi
+          make dmg UNIVERSAL=1
+          lipo -archs "build/I-5 Express.app/Contents/MacOS/I5Express"
+          mv build/I-5-Express.dmg "$NAME"
+          echo "DMG=$NAME" >> "$GITHUB_ENV"
+
+      - name: Save DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: dmg
+          path: ${{ env.DMG }}
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$DMG" \
+            --title "I-5 Express for Mac $GITHUB_REF_NAME" \
+            --notes "Open the DMG and drag I-5 Express to Applications. The first time you open it, macOS says it can't check the app for malware, since it isn't signed with an Apple developer certificate. Go to System Settings → Privacy & Security, click Open Anyway, then open it again. See the [README](https://github.com/andrewmacheret/i5-macos-menubar#install) for details." \
+            --generate-notes
