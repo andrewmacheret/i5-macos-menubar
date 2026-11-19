@@ -67,11 +67,11 @@ A "can't confirm" alert also waits until the lanes are scheduled to open. So a T
 
 ### Settings
 
-The gear menu in the popover turns the countdown, notifications, launch at login and automatic updates on or off. Each toggle reads its real state back from macOS, so it always shows what's actually set.
+The gear menu in the popover and the right-click menu on the icon are the same menu. It can refresh, open WSDOT's page and check for updates. It also turns the countdown, notifications, launch at login and automatic updates on or off. Each toggle reads its real state back from macOS, so it always shows what's actually set.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/menus-dark.png">
-  <img src="docs/menus-light.png" width="590" alt="The gear menu with show countdown, notify, launch at login and install updates automatically options, check for updates and quit, and the right-click menu with refresh, open WSDOT page, check for updates and quit">
+  <img src="docs/menus-light.png" width="316" alt="The menu: refresh, open WSDOT express lanes page, check for updates, then show countdown, notify, launch at login and install updates automatically toggles, then quit">
 </picture>
 
 ### Updates

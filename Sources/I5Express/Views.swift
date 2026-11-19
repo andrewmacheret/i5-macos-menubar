@@ -1,3 +1,4 @@
+import AppKit
 import I5Core
 import SwiftUI
 
@@ -333,13 +334,20 @@ struct PopoverView: View {
         .help("Refresh from WSDOT")
         .keyboardShortcut("r")
 
+        // Same items as the right-click menu in AppDelegate
         Menu {
+            Button("Refresh") { Task { await store.refresh() } }
+                .keyboardShortcut("r")
+            Button("Open WSDOT Express Lanes Page") { NSWorkspace.shared.open(Sources.expressLanes) }
+            if store.canUpdate {
+                Button("Check for Updates…") { store.checkForUpdates() }
+            }
+            Divider()
             Toggle("Show countdown in menu bar", isOn: $store.showCountdown)
             Toggle("Notify when lanes change", isOn: Binding(get: { store.notifyOnChange }, set: { store.setNotify($0) }))
             Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
             if store.canUpdate {
                 Toggle("Install updates automatically", isOn: Binding(get: { store.autoUpdate }, set: { store.setAutoUpdate($0) }))
-                Button("Check for Updates…") { store.checkForUpdates() }
             }
             Divider()
             Button("Quit I-5 Express") { NSApp.terminate(nil) }
@@ -521,7 +529,7 @@ private struct SourceLink: View {
             if snapshotting {
                 label.foregroundStyle(Color.accentColor)
             } else {
-                Link(destination: url) { label }
+                Link(destination: url) { label }.linkCursor()
             }
         }
         .font(.callout)
@@ -554,7 +562,20 @@ private struct WebLink: View {
         if snapshotting {
             Text(title).foregroundStyle(Color.accentColor)
         } else {
-            Link(title, destination: url)
+            Link(title, destination: url).linkCursor()
+        }
+    }
+}
+
+extension View {
+    /// The pointing hand, like links on a web page
+    @ViewBuilder func linkCursor() -> some View {
+        if #available(macOS 15, *) {
+            pointerStyle(.link)
+        } else {
+            onHover { inside in
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
     }
 }

@@ -88,11 +88,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showMenu() {
+        // Same items as the gear menu in the popover
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Open WSDOT Express Lanes Page", action: #selector(openSource), keyEquivalent: "").target = self
         if store.canUpdate {
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+        }
+        menu.addItem(.separator())
+        addToggle(to: menu, "Show countdown in menu bar", store.showCountdown, #selector(toggleCountdown))
+        addToggle(to: menu, "Notify when lanes change", store.notifyOnChange, #selector(toggleNotify))
+        addToggle(to: menu, "Launch at login", store.launchAtLogin, #selector(toggleLaunchAtLogin))
+        if store.canUpdate {
+            addToggle(to: menu, "Install updates automatically", store.autoUpdate, #selector(toggleAutoUpdate))
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit I-5 Express", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -106,8 +114,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await store.refresh() }
     }
 
+    private func addToggle(to menu: NSMenu, _ title: String, _ on: Bool, _ action: Selector) {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = on ? .on : .off
+    }
+
     @objc private func checkForUpdates() {
         store.checkForUpdates()
+    }
+
+    @objc private func toggleCountdown() {
+        store.showCountdown.toggle()
+    }
+
+    @objc private func toggleNotify() {
+        store.setNotify(!store.notifyOnChange)
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        store.setLaunchAtLogin(!store.launchAtLogin)
+    }
+
+    @objc private func toggleAutoUpdate() {
+        store.setAutoUpdate(!store.autoUpdate)
     }
 
     @objc private func openSource() {
