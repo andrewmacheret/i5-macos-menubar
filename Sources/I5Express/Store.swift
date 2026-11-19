@@ -145,7 +145,8 @@ final class Store: ObservableObject {
         let new = snap.check
 
         if old.verdict == .confident, new.verdict == .uncertain {
-            send("Can't confirm the I-5 express lanes", new.concerns.first?.title ?? "Open the app for details")
+            let n = Store.cantConfirmMessage(new)
+            send(n.title, n.body)
             return
         }
         guard old.verdict == .confident, new.verdict == .confident, old.scheduled != new.scheduled else { return }
@@ -154,9 +155,24 @@ final class Store: ObservableObject {
         // Skip short gaps like the 15 minute weekday switchover
         if new.scheduled == .closed, let next = snap.next, next.date.timeIntervalSince(snap.now) < 30 * 60 { return }
 
-        let title = new.scheduled == .closed ? "I-5 express lanes closed" : "I-5 express lanes now \(new.scheduled.title.lowercased())"
-        let body = snap.next.map { "\($0.to.title) at \(Format.when($0.date, now: snap.now))" } ?? ""
-        send(title, body)
+        let n = Store.changeMessage(new.scheduled, next: snap.next, now: snap.now)
+        send(n.title, n.body)
+    }
+
+    static func changeMessage(_ status: LaneStatus, next: Change?, now: Date) -> (title: String, body: String) {
+        let title = status == .closed ? "I-5 express lanes closed" : "I-5 express lanes now \(status.title.lowercased())"
+        guard let next else { return (title, "") }
+        let when = Format.when(next.date, now: now)
+        let body = switch (status, next.to) {
+        case (_, .closed): "Closes at \(when)"
+        case (.closed, let to): "Opens \(to.title.lowercased()) at \(when)"
+        case (_, let to): "Switches \(to.title.lowercased()) at \(when)"
+        }
+        return (title, body)
+    }
+
+    static func cantConfirmMessage(_ check: Assessment) -> (title: String, body: String) {
+        ("Can't confirm the I-5 express lanes", check.concerns.first?.title ?? "Open the app for details")
     }
 
     private func send(_ title: String, _ body: String) {

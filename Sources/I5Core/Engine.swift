@@ -39,6 +39,11 @@ public enum Seattle {
 public struct Change: Hashable, Sendable {
     public var date: Date
     public var to: LaneStatus
+
+    public init(date: Date, to: LaneStatus) {
+        self.date = date
+        self.to = to
+    }
 }
 
 public struct Segment: Hashable, Sendable {

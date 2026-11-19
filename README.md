@@ -17,6 +17,59 @@ Click the icon for details: today's and tomorrow's schedule, upcoming changes, p
   <img src="docs/popover-cant-confirm.png" width="370" alt="Popover on Thanksgiving showing a warning that the status can't be confirmed">
 </p>
 
+## Features
+
+### Menu bar
+
+- A colored badge shows the current state: green **N** for northbound, blue **S** for southbound, red **✕** for closed.
+- An orange dot appears on the badge when the lanes switch within 15 minutes.
+- An amber **⚠** replaces the badge whenever the app can't confirm the status. See [When to trust it](#when-to-trust-it).
+- You can show a countdown to the next change next to the icon. It's off by default.
+- Hover over the icon to see the next change. Right-click it to refresh, open WSDOT's page, or quit.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/menubar-dark.png">
+  <img src="docs/menubar-light.png" width="500" alt="The menu bar with just the S badge, and with the S badge followed by a 52 minute countdown">
+</picture>
+
+### Popover
+
+- **Status:** the current direction and what happens next, like "Closes at 11:00 AM · 52m".
+- **Warnings:** each reason the status can't be confirmed, with links to live sources so you can check before you drive.
+- **Notices:** closures in effect now, tonight's early closure, and WSDOT notices. Notices about days that are over are grayed out.
+- **Timelines:** colored bars for today and tomorrow, with a marker for the current time.
+- **Coming up:** the next four changes with countdowns. A ⚠ marks days that may not follow the regular schedule.
+- **Planned changes:** weekend closures, early closing dates, and holidays in the next two weeks.
+- **Regular schedule and sources:** the weekly schedule as posted, and links to every page the data comes from.
+- **Footer:** when the app last checked WSDOT, a refresh button (⌘R), and the settings menu.
+
+Times are always Seattle time. If your Mac uses another time zone, the popover says so.
+
+### Notifications
+
+Turn on **Notify when lanes change** in the gear menu to get:
+
+- an alert when the lanes switch direction, open or close;
+- an alert when the app goes from confirmed to "can't confirm", with the reason.
+
+To keep alerts useful, the app skips the 15-minute weekday switchover gap and any change that happened while your Mac was asleep.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/notifications-dark.png">
+  <img src="docs/notifications-light.png" width="400" alt="Two notifications: I-5 express lanes now northbound, closes at 11:00 PM; and can't confirm the I-5 express lanes, Thanksgiving may run a holiday schedule">
+</picture>
+
+### Settings
+
+The gear menu in the popover turns the countdown, notifications and launch at login on or off. Each toggle reads its real state back from macOS, so it always shows what's actually set.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/menus-dark.png">
+  <img src="docs/menus-light.png" width="590" alt="The gear menu with show countdown, notify and launch at login options, and the right-click menu with refresh, open WSDOT page and quit">
+</picture>
+
+The menu bar, notification and menu images are previews drawn by the app's snapshot mode (`make screenshots`), using the same icons and message text as the running app.
+
 ## When to trust it
 
 WSDOT doesn't publish a live feed for the express lanes. This app reads [WSDOT's express lanes page](https://wsdot.wa.gov/travel/roads-bridges/express-lanes) and works out the status from the posted schedule, early closures and planned closures.
@@ -30,7 +83,9 @@ It only shows **N**, **S** or **✕** when all of these are true:
 - If today closes early, the page gives the closing time.
 - Today isn't a holiday. WSDOT doesn't post holiday hours.
 
-Otherwise it shows an amber **⚠**, explains why, and links to the [travel map](https://wsdot.com/travel/real-time/map/) and [@wsdot_traffic](https://x.com/wsdot_traffic) so you can check a live source.
+Otherwise it shows an amber **⚠**, explains why, and links to the [travel map](https://wsdot.com/travel/real-time/map/) and [@wsdot_traffic](https://x.com/wsdot_traffic) so you can check a live source. While it's re-reading old data, for example right after your Mac wakes, it briefly shows a gray **?** instead.
+
+If WSDOT can't be reached, the app keeps using the last good copy of the page, and shows ⚠ once that copy is more than 2 hours old.
 
 It can't know about a closure WSDOT hasn't posted yet, like an emergency repair announced only on social media.
 
@@ -44,7 +99,7 @@ cd i5-macos-menubar
 make install
 ```
 
-This builds `I-5 Express.app`, copies it to `~/Applications` and opens it. Use the gear menu in the popover to turn on launch at login, change notifications, or show a countdown next to the icon.
+This builds `I-5 Express.app`, copies it to `~/Applications` and opens it.
 
 The app is signed locally, not with a developer certificate. So macOS may ask you to approve notifications or launch at login again after each rebuild.
 
@@ -63,7 +118,7 @@ I-5 express lanes: SOUTHBOUND
   Source: https://wsdot.wa.gov/travel/roads-bridges/express-lanes
 ```
 
-It exits with code `0` when the status is confirmed and `2` when it isn't, so scripts can check the result.
+It exits with code `0` when the status is confirmed and `2` when it isn't, so scripts can check the result. When it can't confirm, it lists the reasons.
 
 ## Development
 
@@ -84,6 +139,10 @@ The code is split into three parts:
 - `Sources/i5` is the terminal tool.
 
 Tests run against a saved copy of WSDOT's page in `Tests/I5CoreTests/Fixtures`.
+
+## Built with LLM tools
+
+This project was written with LLM coding tools: an AI agent in [Cursor](https://cursor.com) wrote the code, tests and this README, directed by a human. Treat it like any other code from the internet and read it before you rely on it.
 
 ## Not affiliated with WSDOT
 

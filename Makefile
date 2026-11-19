@@ -57,7 +57,7 @@ screenshots: app
 	mkdir -p docs
 	cp build/snapshots/popover-now-dark.png docs/popover-confirmed.png
 	cp build/snapshots/popover-thanksgiving-dark.png docs/popover-cant-confirm.png
-	cp build/snapshots/icons-light.png build/snapshots/icons-dark.png docs/
+	cd build/snapshots && cp icons-*.png menubar-*.png notifications-*.png menus-*.png ../../docs/
 	cp build/AppIcon.iconset/icon_128x128@2x.png docs/app-icon.png
 
 clean:
