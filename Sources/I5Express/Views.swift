@@ -337,6 +337,10 @@ struct PopoverView: View {
             Toggle("Show countdown in menu bar", isOn: $store.showCountdown)
             Toggle("Notify when lanes change", isOn: Binding(get: { store.notifyOnChange }, set: { store.setNotify($0) }))
             Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+            if store.canUpdate {
+                Toggle("Install updates automatically", isOn: Binding(get: { store.autoUpdate }, set: { store.setAutoUpdate($0) }))
+                Button("Check for Updates…") { store.checkForUpdates() }
+            }
             Divider()
             Button("Quit I-5 Express") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")

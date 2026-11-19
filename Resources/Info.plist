@@ -22,6 +22,16 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/andrewmacheret/i5-macos-menubar/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>5fw9SHCC4/mnJ1KBLMZopRJHvIyd9aL+IuT+rkKx3xs=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>21600</integer>
     <key>NSHumanReadableCopyright</key>
     <string>Data from the Washington State Department of Transportation</string>
 </dict>

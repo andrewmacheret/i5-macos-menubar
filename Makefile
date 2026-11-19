@@ -1,6 +1,7 @@
 APP_NAME := I-5 Express
 APP := build/$(APP_NAME).app
 DMG := build/I-5-Express.dmg
+ZIP := build/I-5-Express.zip
 INSTALL_DIR := $(HOME)/Applications
 VERSION ?= 1.0
 BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
@@ -15,7 +16,7 @@ TEST_FLAGS := $(if $(findstring CommandLineTools,$(shell xcode-select -p)),-Xswi
 
 help:
 	@echo "make app        Build build/$(APP_NAME).app"
-	@echo "make dmg        Build $(DMG) for sharing"
+	@echo "make dmg        Build $(DMG) for sharing and $(ZIP) for updates"
 	@echo "make run        Build and open the app"
 	@echo "make install    Copy the app to ~/Applications and open it"
 	@echo "make uninstall  Quit and remove it from ~/Applications"
@@ -26,8 +27,12 @@ help:
 app:
 	swift build -c release --product I5Express $(ARCHS)
 	rm -rf "$(APP)"
-	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
-	cp "$$(swift build -c release $(ARCHS) --show-bin-path)/I5Express" "$(APP)/Contents/MacOS/"
+	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources" "$(APP)/Contents/Frameworks"
+	BIN="$$(swift build -c release $(ARCHS) --show-bin-path)" &&\
+	cp "$$BIN/I5Express" "$(APP)/Contents/MacOS/" &&\
+	ditto "$$BIN/Sparkle.framework" "$(APP)/Contents/Frameworks/Sparkle.framework"
+	install_name_tool -add_rpath @executable_path/../Frameworks "$(APP)/Contents/MacOS/I5Express"
+	cp .build/artifacts/sparkle/Sparkle/LICENSE "$(APP)/Contents/Resources/Sparkle-LICENSE.txt"
 	cp Resources/Info.plist "$(APP)/Contents/"
 	plutil -replace CFBundleShortVersionString -string "$(VERSION)" "$(APP)/Contents/Info.plist"
 	plutil -replace CFBundleVersion -string "$(BUILD_NUMBER)" "$(APP)/Contents/Info.plist"
@@ -37,14 +42,16 @@ app:
 	codesign --force --sign - "$(APP)"
 	@echo "Built $(APP)"
 
-# The Applications shortcut lets people drag the app straight in
+# The DMG is for first installs. The Applications shortcut lets people drag the app straight in.
+# The zip is what the app downloads to update itself. ditto keeps the framework's symlinks.
 dmg: app
-	rm -rf build/dmg "$(DMG)"
+	rm -rf build/dmg "$(DMG)" "$(ZIP)"
 	mkdir -p build/dmg
 	cp -R "$(APP)" build/dmg/
 	ln -s /Applications build/dmg/Applications
 	hdiutil create -volname "$(APP_NAME)" -srcfolder build/dmg -fs HFS+ -format UDZO -ov "$(DMG)"
-	@echo "Built $(DMG)"
+	ditto -c -k --sequesterRsrc --keepParent "$(APP)" "$(ZIP)"
+	@echo "Built $(DMG) and $(ZIP)"
 
 run: app
 	-pkill -x I5Express

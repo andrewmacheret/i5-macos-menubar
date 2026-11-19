@@ -67,12 +67,18 @@ A "can't confirm" alert also waits until the lanes are scheduled to open. So a T
 
 ### Settings
 
-The gear menu in the popover turns the countdown, notifications and launch at login on or off. Each toggle reads its real state back from macOS, so it always shows what's actually set.
+The gear menu in the popover turns the countdown, notifications, launch at login and automatic updates on or off. Each toggle reads its real state back from macOS, so it always shows what's actually set.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/menus-dark.png">
-  <img src="docs/menus-light.png" width="590" alt="The gear menu with show countdown, notify and launch at login options, and the right-click menu with refresh, open WSDOT page and quit">
+  <img src="docs/menus-light.png" width="590" alt="The gear menu with show countdown, notify, launch at login and install updates automatically options, check for updates and quit, and the right-click menu with refresh, open WSDOT page, check for updates and quit">
 </picture>
+
+### Updates
+
+The app checks GitHub for a new version every 6 hours. When there is one, it downloads it, checks that it was signed with the project's update key, installs it and relaunches, all in a second or two with no prompts. Turn off **Install updates automatically** in the gear menu to stop that, or use **Check for Updates…** to check now. The updater is [Sparkle](https://sparkle-project.org).
+
+Versions before 1.1.0 can't update themselves, so install 1.1.0 by hand once.
 
 The menu bar, notification and menu images are previews drawn by the app's snapshot mode (`make screenshots`), using the same icons and message text as the running app.
 
@@ -125,11 +131,23 @@ The app is signed locally, not with a developer certificate. So macOS may ask yo
 
 ### Releases
 
-GitHub Actions tests every push and builds a DMG for both Apple silicon and Intel, saved as a download on the run. Pushing a tag like `v1.0.0` also publishes the DMG as a release:
+GitHub Actions tests every push and builds a DMG for both Apple silicon and Intel, saved as a download on the run. Pushing a tag like `v1.2.0` also publishes a release with:
+
+- the DMG, for first installs;
+- a signed zip and `appcast.xml`, which installed copies use to update themselves.
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+The update signing key lives in the login Keychain (Sparkle's item, account `i5-express`) and in the `SPARKLE_ED_KEY` repository secret. Installed copies only accept updates signed with it, so keep the Keychain copy. If the secret ever needs setting again:
+
+```bash
+umask 077
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account i5-express -x /tmp/i5-key
+gh secret set SPARKLE_ED_KEY -R andrewmacheret/i5-macos-menubar < /tmp/i5-key
+rm /tmp/i5-key
 ```
 
 ## Terminal
@@ -180,4 +198,4 @@ This is a personal project. Schedule data comes from the Washington State Depart
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The app includes [Sparkle](https://github.com/sparkle-project/Sparkle), under [its own license](https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE).

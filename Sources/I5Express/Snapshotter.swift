@@ -195,12 +195,15 @@ enum Snapshotter {
                     ("checkmark", "Show countdown in menu bar", nil),
                     ("checkmark", "Notify when lanes change", nil),
                     ("checkmark", "Launch at login", nil),
+                    ("checkmark", "Install updates automatically", nil),
+                    (nil, "Check for Updates…", nil),
                     (nil, "-", nil),
                     (nil, "Quit I-5 Express", "⌘Q"),
                 ])
                 menu("Right-click the icon", [
                     (nil, "Refresh", "⌘R"),
                     (nil, "Open WSDOT Express Lanes Page", nil),
+                    (nil, "Check for Updates…", nil),
                     (nil, "-", nil),
                     (nil, "Quit I-5 Express", "⌘Q"),
                 ])

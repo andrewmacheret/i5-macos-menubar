@@ -91,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Open WSDOT Express Lanes Page", action: #selector(openSource), keyEquivalent: "").target = self
+        if store.canUpdate {
+            menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit I-5 Express", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -101,6 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refresh() {
         Task { await store.refresh() }
+    }
+
+    @objc private func checkForUpdates() {
+        store.checkForUpdates()
     }
 
     @objc private func openSource() {

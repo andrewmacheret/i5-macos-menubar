@@ -39,6 +39,9 @@ final class Store: ObservableObject {
     /// Only changed through `setNotify` and `setLaunchAtLogin`, so they always match reality
     @Published private(set) var notifyOnChange: Bool
     @Published private(set) var launchAtLogin: Bool
+    @Published private(set) var canUpdate = false
+    @Published private(set) var autoUpdate = false
+    private var updates: Updates?
 
     private let fetcher = Fetcher()
     private let defaults = UserDefaults.standard
@@ -86,6 +89,18 @@ final class Store: ObservableObject {
         }
         Task { await refresh() }
         if notifyOnChange { checkNotificationPermission() }
+        updates = Updates.make()
+        canUpdate = updates != nil
+        autoUpdate = updates?.automatic ?? false
+    }
+
+    func setAutoUpdate(_ on: Bool) {
+        updates?.automatic = on
+        autoUpdate = updates?.automatic ?? false
+    }
+
+    func checkForUpdates() {
+        updates?.checkNow()
     }
 
     func refresh() async {
