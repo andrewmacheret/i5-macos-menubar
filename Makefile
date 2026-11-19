@@ -6,7 +6,7 @@ INSTALL_DIR := $(HOME)/Applications
 TESTING_PLUGINS := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 TEST_FLAGS := $(if $(findstring CommandLineTools,$(shell xcode-select -p)),-Xswiftc -plugin-path -Xswiftc $(TESTING_PLUGINS))
 
-.PHONY: help app run install uninstall test status clean
+.PHONY: help app run install uninstall test status screenshots clean
 
 help:
 	@echo "make app        Build build/$(APP_NAME).app"
@@ -15,6 +15,7 @@ help:
 	@echo "make uninstall  Quit and remove it from ~/Applications"
 	@echo "make test       Run the parser and schedule tests"
 	@echo "make status     Print the current status in the terminal"
+	@echo "make screenshots  Regenerate the images in docs/"
 
 app:
 	swift build -c release --product I5Express
@@ -47,7 +48,17 @@ test:
 	swift test $(TEST_FLAGS)
 
 status:
-	@swift run -c release i5
+	@swift build -c release --product i5 >/dev/null 2>&1 || swift build -c release --product i5
+	@"$$(swift build -c release --show-bin-path)/i5"
+
+screenshots: app
+	rm -rf build/snapshots
+	"$(APP)/Contents/MacOS/I5Express" --snapshot build/snapshots
+	mkdir -p docs
+	cp build/snapshots/popover-now-dark.png docs/popover-confirmed.png
+	cp build/snapshots/popover-thanksgiving-dark.png docs/popover-cant-confirm.png
+	cp build/snapshots/icons-light.png build/snapshots/icons-dark.png docs/
+	cp build/AppIcon.iconset/icon_128x128@2x.png docs/app-icon.png
 
 clean:
 	rm -rf .build build

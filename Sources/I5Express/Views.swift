@@ -3,8 +3,7 @@ import SwiftUI
 
 struct PopoverView: View {
     @ObservedObject var store: Store
-    /// Off for snapshots, since ImageRenderer can't draw scroll views
-    var scrolls = true
+    @Environment(\.snapshotting) private var snapshotting
 
     private var snap: Snapshot { store.snapshot }
     private var check: Assessment { snap.check }
@@ -16,11 +15,12 @@ struct PopoverView: View {
             header
                 .padding(16)
             Divider()
-            if scrolls {
+            // ImageRenderer can't draw scroll views
+            if snapshotting {
+                content
+            } else {
                 ScrollView { content }
                     .frame(maxHeight: 540)
-            } else {
-                content
             }
             Divider()
             footer
@@ -62,7 +62,7 @@ struct PopoverView: View {
                 case .checking:
                     HStack(spacing: 8) {
                         Text("Checking…").font(.system(size: 26, weight: .bold, design: .rounded))
-                        ProgressView().controlSize(.small)
+                        if !snapshotting { ProgressView().controlSize(.small) }
                     }
                     Text("Reading WSDOT's latest schedule").font(.callout).foregroundStyle(.secondary)
                 case .uncertain:
@@ -102,9 +102,9 @@ struct PopoverView: View {
                 .font(.callout.weight(.medium))
                 .padding(.top, 2)
             HStack(spacing: 14) {
-                Link("Traffic cameras", destination: Sources.travelMap)
-                Link("@wsdot_traffic", destination: Sources.wsdotTrafficX)
-                Link("WSDOT page", destination: Sources.expressLanes)
+                WebLink("Traffic cameras", Sources.travelMap)
+                WebLink("@wsdot_traffic", Sources.wsdotTrafficX)
+                WebLink("WSDOT page", Sources.expressLanes)
             }
             .font(.callout)
         }
@@ -280,7 +280,8 @@ struct PopoverView: View {
             SectionTitle("Sources")
             SourceLink(title: "WSDOT express lanes schedule", subtitle: "Where this data comes from", url: Sources.expressLanes)
             ForEach(eventLinks, id: \.self) { url in
-                SourceLink(title: "Construction project page", subtitle: url.host() ?? "", url: url)
+                let bulletin = url.host()?.contains("govdelivery") == true
+                SourceLink(title: bulletin ? "WSDOT bulletin" : "Construction project page", subtitle: url.host() ?? "", url: url)
             }
             SourceLink(title: "Revive I-5", subtitle: "Ship Canal Bridge work", url: Sources.reviveI5)
             SourceLink(title: "WSDOT real-time travel map", subtitle: "Live traffic, alerts and cameras", url: Sources.travelMap)
@@ -309,33 +310,42 @@ struct PopoverView: View {
         HStack(spacing: 10) {
             sourceStatus
             Spacer()
-            Button {
-                Task { await store.refresh() }
-            } label: {
-                if store.isRefreshing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh from WSDOT")
-            .keyboardShortcut("r")
-
-            Menu {
-                Toggle("Show countdown in menu bar", isOn: $store.showCountdown)
-                Toggle("Notify when lanes change", isOn: Binding(get: { store.notifyOnChange }, set: { store.setNotify($0) }))
-                Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-                Divider()
-                Button("Quit I-5 Express") { NSApp.terminate(nil) }
-                    .keyboardShortcut("q")
-            } label: {
+            if snapshotting {
+                Image(systemName: "arrow.clockwise")
                 Image(systemName: "gearshape")
+            } else {
+                controls
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
+    }
+
+    @ViewBuilder private var controls: some View {
+        Button {
+            Task { await store.refresh() }
+        } label: {
+            if store.isRefreshing {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.borderless)
+        .help("Refresh from WSDOT")
+        .keyboardShortcut("r")
+
+        Menu {
+            Toggle("Show countdown in menu bar", isOn: $store.showCountdown)
+            Toggle("Notify when lanes change", isOn: Binding(get: { store.notifyOnChange }, set: { store.setNotify($0) }))
+            Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+            Divider()
+            Button("Quit I-5 Express") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+        } label: {
+            Image(systemName: "gearshape")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     private var sourceStatus: some View {
@@ -393,7 +403,7 @@ private struct Callout: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let link {
-                    Link("More info", destination: link).font(.callout)
+                    WebLink("More info", link).font(.callout)
                 }
             }
         }
@@ -500,17 +510,60 @@ private struct SourceLink: View {
     let subtitle: String
     let url: URL
 
+    @Environment(\.snapshotting) private var snapshotting
+
     var body: some View {
-        Link(destination: url) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.up.right.square")
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title).foregroundStyle(Color.accentColor)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
+        Group {
+            if snapshotting {
+                label.foregroundStyle(Color.accentColor)
+            } else {
+                Link(destination: url) { label }
             }
         }
         .font(.callout)
         .help(url.absoluteString)
+    }
+
+    private var label: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.up.right.square")
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).foregroundStyle(Color.accentColor)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// A text link. Snapshots draw it as plain text, since ImageRenderer can't draw links.
+private struct WebLink: View {
+    let title: String
+    let url: URL
+    @Environment(\.snapshotting) private var snapshotting
+
+    init(_ title: String, _ url: URL) {
+        self.title = title
+        self.url = url
+    }
+
+    var body: some View {
+        if snapshotting {
+            Text(title).foregroundStyle(Color.accentColor)
+        } else {
+            Link(title, destination: url)
+        }
+    }
+}
+
+// Written out by hand, since the Command Line Tools don't ship the @Entry macro
+private struct SnapshottingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while rendering PNG snapshots
+    var snapshotting: Bool {
+        get { self[SnapshottingKey.self] }
+        set { self[SnapshottingKey.self] = newValue }
     }
 }
