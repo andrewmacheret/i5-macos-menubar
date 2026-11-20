@@ -4,6 +4,9 @@ import SwiftUI
 
 struct PopoverView: View {
     @ObservedObject var store: Store
+    var openMenu: () -> Void = {}
+    /// Gets the gear's frame, measured from the top left of the popover
+    var gearMoved: (CGRect) -> Void = { _ in }
     @Environment(\.snapshotting) private var snapshotting
 
     private var snap: Snapshot { store.snapshot }
@@ -29,6 +32,7 @@ struct PopoverView: View {
                 .padding(.vertical, 10)
         }
         .frame(width: 370)
+        .coordinateSpace(.named("popover"))
     }
 
     private var content: some View {
@@ -334,30 +338,13 @@ struct PopoverView: View {
         .help("Refresh from WSDOT")
         .keyboardShortcut("r")
 
-        // Same items as the right-click menu in AppDelegate
-        Menu {
-            Button("Refresh") { Task { await store.refresh() } }
-                .keyboardShortcut("r")
-            Button("Open WSDOT Express Lanes Page") { NSWorkspace.shared.open(Sources.expressLanes) }
-            if store.canUpdate {
-                Button("Check for Updates…") { store.checkForUpdates() }
-            }
-            Divider()
-            Toggle("Show countdown in menu bar", isOn: $store.showCountdown)
-            Toggle("Notify when lanes change", isOn: Binding(get: { store.notifyOnChange }, set: { store.setNotify($0) }))
-            Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-            if store.canUpdate {
-                Toggle("Install updates automatically", isOn: Binding(get: { store.autoUpdate }, set: { store.setAutoUpdate($0) }))
-            }
-            Divider()
-            Button("Quit I-5 Express") { NSApp.terminate(nil) }
-                .keyboardShortcut("q")
-        } label: {
+        // Opens the same menu as right-clicking the icon
+        Button(action: openMenu) {
             Image(systemName: "gearshape")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.borderless)
+        .help("Settings")
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("popover")) } action: { gearMoved($0) }
     }
 
     private var sourceStatus: some View {

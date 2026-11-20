@@ -9,6 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var bag = Set<AnyCancellable>()
+    /// NSApp.isActive says true as soon as the popover opens, even when macOS hasn't made the app active
+    private var active = false
+    private var pendingMenuAt: NSPoint?
+    private var gearMenu: NSMenu?
+    /// The gear button's frame, measured from the top left of the popover
+    private var gear = CGRect.zero
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -19,7 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.imagePosition = .imageLeading
         }
 
-        let host = NSHostingController(rootView: PopoverView(store: store))
+        let host = NSHostingController(rootView: PopoverView(store: store, openMenu: { [weak self] in self?.popUpMenu() },
+                                                             gearMoved: { [weak self] in self?.gear = $0 }))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         popover.behavior = .transient
@@ -29,6 +36,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .combineLatest(store.$showCountdown)
             .receive(on: RunLoop.main)
             .sink { [weak self] snap, countdown in self?.updateButton(snap, countdown: countdown) }
+            .store(in: &bag)
+
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                active = true
+                // Let this notification finish before the menu takes over the run loop
+                DispatchQueue.main.async { self.showPendingMenu() }
+            }
+            .store(in: &bag)
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                active = false
+                // The popover doesn't always close by itself once the app has been active
+                if popover.isShown { popover.performClose(nil) }
+            }
+            .store(in: &bag)
+        // Don't leave the gear menu floating on its own
+        NotificationCenter.default.publisher(for: NSPopover.willCloseNotification, object: popover)
+            .sink { [weak self] _ in self?.gearMenu?.cancelTracking() }
             .store(in: &bag)
 
         store.start()
@@ -88,7 +116,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showMenu() {
-        // Same items as the gear menu in the popover
+        statusItem.menu = makeMenu()
+        statusItem.button?.performClick(nil)
+        // Clear it so the next left click opens the popover again
+        statusItem.menu = nil
+    }
+
+    /// For the gear button in the popover
+    private func popUpMenu() {
+        guard let view = popover.contentViewController?.view else { return }
+        // Open it a bit below the gear, not under the mouse. A second click on the gear then
+        // closes the menu, instead of landing on the menu's clear edge and closing the popover.
+        // The menu window has about 6 points of clear padding above its first item.
+        let gap: CGFloat = 12
+        let at = NSPoint(x: gear.minX, y: view.isFlipped ? gear.maxY + gap : view.bounds.height - gear.maxY - gap)
+        if active {
+            showMenu(at: at)
+            return
+        }
+        // macOS won't make the app active when the popover opens, but it will when the gear is clicked.
+        // A menu that opens before that closes as soon as the app becomes active, so wait for it.
+        pendingMenuAt = at
+        NSApp.activate()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.showPendingMenu() }
+    }
+
+    private func showPendingMenu() {
+        guard let at = pendingMenuAt else { return }
+        pendingMenuAt = nil
+        if popover.isShown { showMenu(at: at) }
+    }
+
+    /// `at` is in the popover's view
+    private func showMenu(at: NSPoint) {
+        let menu = makeMenu()
+        gearMenu = menu
+        menu.popUp(positioning: nil, at: at, in: popover.contentViewController?.view)
+        gearMenu = nil
+    }
+
+    /// The menu for right-clicking the icon and for the gear button
+    private func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Open WSDOT Express Lanes Page", action: #selector(openSource), keyEquivalent: "").target = self
@@ -104,10 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit I-5 Express", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        // Clear it so the next left click opens the popover again
-        statusItem.menu = nil
+        return menu
     }
 
     @objc private func refresh() {
