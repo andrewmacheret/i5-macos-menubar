@@ -20,9 +20,20 @@ public enum Seattle {
         return TimeOfDay(c.hour!, c.minute!)
     }
 
+    /// The moment a Seattle clock shows `time` on `day`. On daylight saving days a skipped
+    /// time like 2:30 AM moves an hour later, and a repeated one uses the first time around.
     public static func date(_ day: DayKey, _ time: TimeOfDay) -> Date? {
-        let base = calendar.date(from: DateComponents(year: day.year, month: day.month, day: day.day))
-        return base.flatMap { calendar.date(byAdding: .minute, value: time.minutes, to: $0) }
+        guard let midnight = calendar.date(from: DateComponents(year: day.year, month: day.month, day: day.day))
+        else { return nil }
+        if time.minutes >= 24 * 60 { return calendar.date(byAdding: .day, value: 1, to: midnight) }
+        // Count from midnight, then undo any clock change since. Seattle changes clocks at 2 AM,
+        // never at midnight.
+        let guess = midnight.addingTimeInterval(Double(time.minutes * 60))
+        let change = timeZone.secondsFromGMT(for: guess) - timeZone.secondsFromGMT(for: midnight)
+        let fixed = guess.addingTimeInterval(Double(-change))
+        // If the fix lands on the other side of the change, the clock skipped this time.
+        // Keep the guess, which is an hour later.
+        return timeZone.secondsFromGMT(for: fixed) == timeZone.secondsFromGMT(for: guess) ? fixed : guess
     }
 
     public static func isWeekend(_ day: DayKey) -> Bool {

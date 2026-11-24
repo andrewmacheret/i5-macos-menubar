@@ -30,6 +30,17 @@ import Testing
         }
     }
 
+    @Test func wallTimesOnDaylightSavingDays() {
+        let iso = ISO8601DateFormatter()
+        // Mar 8, 2026 jumps from 2 AM to 3 AM, so 2:30 AM doesn't exist and moves to 3:30
+        #expect(Seattle.date(day(2026, 3, 8), TimeOfDay(10)) == iso.date(from: "2026-03-08T10:00:00-07:00"))
+        #expect(Seattle.date(day(2026, 3, 8), TimeOfDay(2, 30)) == iso.date(from: "2026-03-08T03:30:00-07:00"))
+        // Nov 1, 2026 goes through 1 AM twice. Use the first one
+        #expect(Seattle.date(day(2026, 11, 1), TimeOfDay(1, 30)) == iso.date(from: "2026-11-01T01:30:00-07:00"))
+        #expect(Seattle.date(day(2026, 11, 1), TimeOfDay(10)) == iso.date(from: "2026-11-01T10:00:00-08:00"))
+        #expect(Seattle.date(day(2026, 11, 1), .endOfDay) == iso.date(from: "2026-11-02T00:00:00-08:00"))
+    }
+
     @Test func weekday() {
         // Thu Nov 19, 2026
         #expect(engine.status(at: seattle(2026, 11, 19, 4, 59)) == .closed)
