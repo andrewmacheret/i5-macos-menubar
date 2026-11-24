@@ -2,6 +2,8 @@
 
 # I-5 Express for Mac Menu Bar
 
+[![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml)
+
 A macOS menu bar app that shows which way Seattle's I-5 express lanes are running right now, and whether they're open at all.
 
 <picture>
