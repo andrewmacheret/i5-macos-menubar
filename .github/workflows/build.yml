@@ -8,6 +8,7 @@ on:
     tags: ["v*"]
     paths-ignore:
       - "**.md"
+      - ".github/workflows/canary.yml"
       - "LICENSE"
       - "docs/**"
   pull_request:

@@ -2,7 +2,7 @@
 
 # I-5 Express for Mac Menu Bar
 
-[![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml) [![License](https://img.shields.io/badge/license-MIT-lightgray.svg)](https://github.com/andrewmacheret/i5-macos-menubar/blob/main/LICENSE)
+[![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml) [![Canary](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml) [![License](https://img.shields.io/badge/license-MIT-lightgray.svg)](https://github.com/andrewmacheret/i5-macos-menubar/blob/main/LICENSE)
 
 A macOS menu bar app that shows which way Seattle's I-5 express lanes are running right now, and whether they're open at all.
 
@@ -197,6 +197,10 @@ The code is split into three parts:
 - `Sources/i5` is the terminal tool.
 
 Tests run against a saved copy of WSDOT's page in `Tests/I5CoreTests/Fixtures`.
+
+## Health check
+
+The Canary workflow (`.github/workflows/canary.yml`) builds the `i5` terminal tool once a day and fails if it can't read WSDOT's real page, like when WSDOT changes the page in a way the parser can't read. It's started by [andrewmacheret/canary](https://github.com/andrewmacheret/canary).
 
 ## Built with LLM tools
 

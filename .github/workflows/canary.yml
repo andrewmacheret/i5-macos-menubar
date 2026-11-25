@@ -1,0 +1,32 @@
+name: Canary
+
+# Started once a day by github.com/andrewmacheret/canary
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wsdot:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the i5 tool
+        run: swift build -c release --product i5
+
+      # The tool exits 2 when it can't confirm the lanes, which also happens on normal days, like during closures.
+      # "Checked WSDOT" only shows up when it read WSDOT's page itself.
+      # WSDOT's site sometimes times out once, so try again before failing.
+      - name: Read WSDOT's page
+        run: |
+          i5="$(swift build -c release --show-bin-path)/i5"
+          for try in 1 2; do
+            "$i5" | tee out.txt || true
+            if grep -q 'Checked WSDOT at' out.txt; then exit 0; fi
+            if [ "$try" = 1 ]; then sleep 30; fi
+          done
+          echo "::error::The i5 tool couldn't read WSDOT's page"
+          exit 1
