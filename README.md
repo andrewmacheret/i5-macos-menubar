@@ -4,6 +4,10 @@
 
 [![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml) [![Canary](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml) [![License](https://img.shields.io/badge/license-MIT-lightgray.svg)](https://github.com/andrewmacheret/i5-macos-menubar/blob/main/LICENSE.md)
 
+**[Install](#install):** [Homebrew](#homebrew) · [Download](#download) · [Build it yourself](#build-it-yourself)
+
+**See also:** [Android widget](https://github.com/andrewmacheret/i5-android) · [Web page](https://github.com/andrewmacheret/i5-client) · [Server](https://github.com/andrewmacheret/i5-server-lambdas)
+
 A macOS menu bar app that shows which way Seattle's I-5 express lanes are running right now, and whether they're open at all.
 
 The data comes from [i5-server-lambdas](https://github.com/andrewmacheret/i5-server-lambdas), which reads WSDOT's express lanes page and highway alerts every 15 minutes and has two AI models read each new notice. The app downloads the server's timeline and works out the status from it, minute by minute, even offline.
