@@ -2,7 +2,7 @@
 
 # I-5 Express for Mac Menu Bar
 
-[![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml) [![Canary](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml) [![License](https://img.shields.io/badge/license-MIT-lightgray.svg)](https://github.com/andrewmacheret/i5-macos-menubar/blob/main/LICENSE)
+[![Build](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/build.yml) [![Canary](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml/badge.svg)](https://github.com/andrewmacheret/i5-macos-menubar/actions/workflows/canary.yml) [![License](https://img.shields.io/badge/license-MIT-lightgray.svg)](https://github.com/andrewmacheret/i5-macos-menubar/blob/main/LICENSE.md)
 
 A macOS menu bar app that shows which way Seattle's I-5 express lanes are running right now, and whether they're open at all.
 
@@ -225,4 +225,4 @@ This is a personal project. Schedule data, travel times and camera pictures come
 
 ## License
 
-[MIT](LICENSE). The app includes [Sparkle](https://github.com/sparkle-project/Sparkle), under [its own license](https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE).
+[MIT](LICENSE.md). The app includes [Sparkle](https://github.com/sparkle-project/Sparkle), under [its own license](https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE).
