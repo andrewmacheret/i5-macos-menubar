@@ -3,9 +3,26 @@ import I5Core
 import SwiftUI
 
 /// Renders the UI to PNG files so it can be checked without clicking around.
+/// The popovers come from the test fixtures, which are real /status answers, so they never need the server.
 @MainActor
 enum Snapshotter {
-    static func run(into dir: URL) {
+    private struct Fixture: Decodable {
+        var at: Moment
+        var status: ServerStatus
+    }
+
+    static func run(into dir: URL, fixtures: URL) -> Bool {
+        func fixture(_ name: String) -> Fixture? {
+            guard let data = try? Data(contentsOf: fixtures.appendingPathComponent("\(name).json")) else { return nil }
+            return try? JSONDecoder().decode(Fixture.self, from: data)
+        }
+        guard let confident = fixture("confident"), let holiday = fixture("holiday"), let checking = fixture("checking"),
+              let failed = fixture("failed"), let stale = fixture("stale"), let winter = fixture("winter-2022"),
+              let revive = fixture("revive-2026")
+        else {
+            print("Couldn't read the fixtures in \(fixtures.path)")
+            return false
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         for status in LaneStatus.allCases {
@@ -16,32 +33,25 @@ enum Snapshotter {
         }
         write(Icon.warning(height: 16), scale: 4, to: dir.appendingPathComponent("badge-warning.png"))
 
-        var live: FetchResult?
-        let done = DispatchSemaphore(value: 0)
-        Task {
-            live = await Fetcher().load()
-            done.signal()
-        }
-        while done.wait(timeout: .now()) == .timedOut {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        }
-        guard let live else { return }
+        let pictures = download(Cameras.express(confident.status.cameras).map(\.image))
 
-        let now = Date()
-        var thanksgiving = live
-        let tgDate = Seattle.date(DayKey(year: 2026, month: 11, day: 26), TimeOfDay(10))!
-        thanksgiving.source = .live(tgDate)
-
-        let scenarios: [(String, Store)] = [
-            ("now", Store(preview: live, now: now)),
-            ("thanksgiving", Store(preview: thanksgiving, now: tgDate)),
-            ("offline", Store(preview: FetchResult(info: .builtIn, source: .builtIn, error: "The Internet connection appears to be offline."), now: now)),
-            ("checking", Store(preview: FetchResult(info: .builtIn, source: .builtIn), now: now, refreshing: true)),
+        func preview(_ f: Fixture) -> Store { Store(preview: f.status, now: f.at) }
+        let scenarios: [(String, Store, Bool)] = [
+            ("confident", preview(confident), true),
+            ("holiday", preview(holiday), false),
+            ("checking", preview(checking), false),
+            ("failed", preview(failed), false),
+            ("stale", preview(stale), false),
+            ("winter-2022", preview(winter), false),
+            ("revive-2026", preview(revive), false),
+            ("loading", Store(preview: nil, now: confident.at, refreshing: true), false),
+            ("offline", Store(preview: nil, now: confident.at, loadError: "Couldn't reach the server: The Internet connection appears to be offline."), false),
         ]
-        for (name, store) in scenarios {
+        for (name, store, camerasOpen) in scenarios {
             for scheme in [ColorScheme.light, .dark] {
-                let view = PopoverView(store: store)
+                let view = PopoverView(store: store, camerasOpen: camerasOpen)
                     .environment(\.snapshotting, true)
+                    .environment(\.cameraImages, pictures)
                     .environment(\.colorScheme, scheme)
                     .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.97))
                 let renderer = ImageRenderer(content: view)
@@ -52,15 +62,15 @@ enum Snapshotter {
             }
         }
         // Fixed example times so the README images don't depend on when they're made
-        let tenAM = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(10, 8))!
-        let quarterPast = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(11, 15))!
-        let elevenPM = Seattle.date(DayKey(year: 2026, month: 11, day: 19), TimeOfDay(23))!
-        let change = Alerts.change(.northbound, next: Change(date: elevenPM, to: .closed), now: quarterPast)
-        let cantConfirm = Alerts.cantConfirm(scenarios[1].1.snapshot.check)
+        let tenAM = Seattle.instant("2026-11-19", hm(10, 8))
+        let quarterPast = Seattle.instant("2026-11-19", hm(11, 15))
+        let elevenPM = Seattle.instant("2026-11-19", hm(23))
+        let change = Notifications.change(.northbound, next: Change(at: elevenPM, to: .closed), now: quarterPast)
+        let cantConfirm = Notifications.cantConfirm(scenarios[1].1.snapshot.check)
 
         let extras: [(String, AnyView)] = [
             ("icons", AnyView(IconStates())),
-            ("menubar", AnyView(MenuBarPreview(status: .southbound, countdown: Format.countdown(to: tenAM.addingTimeInterval(52 * 60), from: tenAM)))),
+            ("menubar", AnyView(MenuBarPreview(status: .southbound, countdown: Format.countdown(to: tenAM + 52 * 60_000, from: tenAM)))),
             ("notifications", AnyView(NotificationPreview(messages: [change, cantConfirm]))),
             ("menus", AnyView(MenusPreview())),
         ]
@@ -74,6 +84,30 @@ enum Snapshotter {
             }
         }
         print("Wrote snapshots to \(dir.path)")
+        if pictures.isEmpty { print("Couldn't download the camera pictures, so the snapshots show placeholders") }
+        return true
+    }
+
+    /// Downloads camera pictures for the snapshots, giving up after 15 seconds
+    private static func download(_ urls: [String]) -> [String: NSImage] {
+        var out: [String: NSImage] = [:]
+        var done = false
+        Task {
+            for url in urls {
+                guard let u = URL(string: url) else { continue }
+                var req = URLRequest(url: u, timeoutInterval: 15)
+                req.setValue(Store.userAgent, forHTTPHeaderField: "User-Agent")
+                if let (data, _) = try? await URLSession.shared.data(for: req), let image = NSImage(data: data) {
+                    out[url] = image
+                }
+            }
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(15)
+        while !done, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        return out
     }
 
     /// Every menu bar icon with what it means, drawn on a fake menu bar
@@ -151,7 +185,7 @@ enum Snapshotter {
 
     /// Banners laid out like macOS notifications, using the app's real messages
     private struct NotificationPreview: View {
-        let messages: [Alerts.Message]
+        let messages: [Notifications.Message]
         @Environment(\.colorScheme) private var scheme
 
         var body: some View {

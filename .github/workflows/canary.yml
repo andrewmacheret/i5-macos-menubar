@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  wsdot:
+  server:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -18,9 +18,9 @@ jobs:
         run: swift build -c release --product i5
 
       # The tool exits 2 when it can't confirm the lanes, which also happens on normal days, like during closures.
-      # "Checked WSDOT" only shows up when it read WSDOT's page itself.
-      # WSDOT's site sometimes times out once, so try again before failing.
-      - name: Read WSDOT's page
+      # "Checked WSDOT" only shows up when the I-5 server answered and read WSDOT in the last 2 hours.
+      # A cold Lambda sometimes times out once, so try again before failing.
+      - name: Read the I-5 server
         run: |
           i5="$(swift build -c release --show-bin-path)/i5"
           for try in 1 2; do
@@ -28,5 +28,5 @@ jobs:
             if grep -q 'Checked WSDOT at' out.txt; then exit 0; fi
             if [ "$try" = 1 ]; then sleep 30; fi
           done
-          echo "::error::The i5 tool couldn't read WSDOT's page"
+          echo "::error::The i5 tool couldn't get fresh data from the I-5 server"
           exit 1

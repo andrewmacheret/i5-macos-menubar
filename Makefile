@@ -20,9 +20,9 @@ help:
 	@echo "make run        Build and open the app"
 	@echo "make install    Copy the app to ~/Applications and open it"
 	@echo "make uninstall  Quit and remove it from ~/Applications"
-	@echo "make test       Run the parser and schedule tests"
-	@echo "make status     Print the current status in the terminal"
-	@echo "make screenshots  Regenerate the images in docs/"
+	@echo "make test       Run the timeline, trust and popover text tests"
+	@echo "make status     Print the server's current status in the terminal"
+	@echo "make screenshots  Regenerate the images in docs/ from the test fixtures"
 
 app:
 	swift build -c release --product I5Express $(ARCHS)
@@ -77,10 +77,10 @@ status:
 
 screenshots: app
 	rm -rf build/snapshots
-	"$(APP)/Contents/MacOS/I5Express" --snapshot build/snapshots
+	"$(APP)/Contents/MacOS/I5Express" --snapshot build/snapshots --fixtures Tests/I5CoreTests/Fixtures
 	mkdir -p docs
-	cp build/snapshots/popover-now-dark.png docs/popover-confirmed.png
-	cp build/snapshots/popover-thanksgiving-dark.png docs/popover-cant-confirm.png
+	cp build/snapshots/popover-confident-dark.png docs/popover-confirmed.png
+	cp build/snapshots/popover-holiday-dark.png docs/popover-cant-confirm.png
 	cd build/snapshots && cp icons-*.png menubar-*.png notifications-*.png menus-*.png ../../docs/
 	cp build/AppIcon.iconset/icon_128x128@2x.png docs/app-icon.png
 

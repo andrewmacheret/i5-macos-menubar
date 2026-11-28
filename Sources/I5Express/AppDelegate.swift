@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.publisher(for: NSPopover.willCloseNotification, object: popover)
             .sink { [weak self] _ in self?.gearMenu?.cancelTracking() }
             .store(in: &bag)
+        NotificationCenter.default.publisher(for: NSPopover.didCloseNotification, object: popover)
+            .sink { [weak self] _ in self?.store.popoverShown = false }
+            .store(in: &bag)
 
         store.start()
 
@@ -67,7 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let frame = button.window?.frame ?? .zero
                 print("status item visible=\(statusItem.isVisible) frame=\(frame) image=\(button.image?.size ?? .zero)")
                 let check = store.snapshot.check
-                print("verdict=\(check.verdict) scheduled=\(check.scheduled) source=\(store.result.source) error=\(store.result.error ?? "none")")
+                let fetched = store.status?.fetchedAt.map(Format.clock) ?? "never"
+                print("verdict=\(check.verdict) scheduled=\(check.scheduled) fetchedAt=\(fetched) error=\(store.loadError ?? "none")")
                 for c in check.concerns { print("concern: \(c.title) | \(c.detail)") }
                 fflush(stdout)
             }
@@ -78,19 +82,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         let check = snap.check
         button.image = Icon.current(check, height: 16, soon: snap.changingSoon)
-        if countdown, check.verdict == .confident, let next = snap.next {
-            button.title = " " + Format.countdown(to: next.date, from: snap.now)
+        if countdown, check.verdict == .confident, let next = snap.next, next.to != .unknown {
+            button.title = " " + Format.countdown(to: next.at, from: snap.now)
             button.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         } else {
             button.title = ""
         }
         switch check.verdict {
         case .confident:
-            var tip = "I-5 express lanes: \(check.scheduled.title)"
-            if let next = snap.next { tip += "\n\(next.to.title) at \(Format.when(next.date, now: snap.now))" }
-            button.toolTip = tip
+            button.toolTip = "I-5 express lanes: \(check.scheduled.title)\n\(snap.nextText)"
         case .checking:
-            button.toolTip = "Checking WSDOT…"
+            button.toolTip = "Checking the I-5 express lanes…"
         case .uncertain:
             button.toolTip = "Can't confirm the I-5 express lanes\n" + check.concerns.map(\.title).joined(separator: "\n")
         }
@@ -109,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             store.tick()
+            store.popoverShown = true
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             NSApp.activate()
@@ -206,6 +209,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSource() {
-        NSWorkspace.shared.open(Sources.expressLanes)
+        NSWorkspace.shared.open(URL(string: Sources.expressLanes)!)
     }
 }

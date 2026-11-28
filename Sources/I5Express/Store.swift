@@ -1,37 +1,20 @@
 import AppKit
 import Combine
 import I5Core
+import Network
 import ServiceManagement
 import UserNotifications
 
-/// Everything the menu bar icon and popover show, worked out once per tick.
-struct Snapshot {
-    var now: Date
-    var check: Assessment
-    var changes: [Change]
-    var today: [Segment]
-    var tomorrow: [Segment]
-    var tomorrowConcerns: [Concern]
-    /// Days in the next week that may not follow the schedule
-    var doubtfulDays: Set<DayKey>
-    var activeClosure: Closure?
-    var earlyCloseTonight: TimeOfDay?
-
-    var next: Change? { changes.first }
-
-    /// True when the lanes flip within 15 minutes
-    var changingSoon: Bool {
-        guard let next else { return false }
-        return next.date.timeIntervalSince(now) <= 15 * 60
-    }
-}
-
 @MainActor
 final class Store: ObservableObject {
-    @Published private(set) var result: FetchResult
+    /// The server's latest answer, or the saved copy. Nil before the first one.
+    @Published private(set) var status: ServerStatus?
+    @Published private(set) var loadError: String?
     @Published private(set) var snapshot: Snapshot
     @Published private(set) var isRefreshing = false
     @Published private(set) var settingsMessage: String?
+    /// Set by the app delegate, so camera pictures only load while someone can see them
+    @Published var popoverShown = false
 
     @Published var showCountdown: Bool {
         didSet { defaults.set(showCountdown, forKey: "showCountdown") }
@@ -43,21 +26,31 @@ final class Store: ObservableObject {
     @Published private(set) var autoUpdate = false
     private var updates: Updates?
 
-    private let fetcher = Fetcher()
+    private let client = StatusClient(userAgent: Store.userAgent)
     private let defaults = UserDefaults.standard
     private var tickTimer: Timer?
     private var refreshTimer: Timer?
     private var wakeObserver: NSObjectProtocol?
-    private var lastSeen: Alerts.Seen?
+    private var network: NWPathMonitor?
+    private var wasOnline: Bool?
+    private var lastSeen: Notifications.Seen?
+    /// Frozen time for snapshots
+    private var previewNow: Moment?
 
     /// Notifications and login items need a real .app bundle
     private let isBundled = Bundle.main.bundleIdentifier != nil
 
+    nonisolated static var userAgent: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        return "I5ExpressMac/\(version) (+https://github.com/andrewmacheret/i5-macos-menubar)"
+    }
+
     init() {
-        let initial = Fetcher().cachedOrBuiltIn()
-        result = initial
+        let saved = client.saved()
+        status = saved
         // Counts as refreshing, since start() downloads right away
-        snapshot = Store.makeSnapshot(initial, now: Date(), refreshing: true)
+        snapshot = Snapshot(status: saved ?? .empty, now: Date().moment, refreshing: true)
+        isRefreshing = true
         showCountdown = defaults.object(forKey: "showCountdown") as? Bool ?? false
         notifyOnChange = defaults.bool(forKey: "notifyOnChange")
         launchAtLogin = false
@@ -65,9 +58,11 @@ final class Store: ObservableObject {
     }
 
     /// A frozen store for snapshots
-    init(preview result: FetchResult, now: Date, refreshing: Bool = false) {
-        self.result = result
-        snapshot = Store.makeSnapshot(result, now: now, refreshing: refreshing)
+    init(preview status: ServerStatus?, now: Moment, refreshing: Bool = false, loadError: String? = nil) {
+        self.status = status
+        self.loadError = loadError
+        previewNow = now
+        snapshot = Snapshot(status: status ?? .empty, now: now, refreshing: refreshing)
         isRefreshing = refreshing
         showCountdown = false
         notifyOnChange = false
@@ -78,8 +73,8 @@ final class Store: ObservableObject {
         tickTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
-        // Every 15 minutes keeps data well inside the 2 hour freshness limit
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+        // The server reads WSDOT every 15 minutes, so every 5 minutes catches each new read soon enough
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -87,11 +82,29 @@ final class Store: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
+        watchNetwork()
+        isRefreshing = false
         Task { await refresh() }
         if notifyOnChange { checkNotificationPermission() }
         updates = Updates.make()
         canUpdate = updates != nil
         autoUpdate = updates?.automatic ?? false
+    }
+
+    /// Refreshes when the Mac comes back online
+    private func watchNetwork() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(online: online) }
+        }
+        monitor.start(queue: DispatchQueue(label: "i5.network"))
+        network = monitor
+    }
+
+    private func networkChanged(online: Bool) {
+        defer { wasOnline = online }
+        if online, wasOnline == false { Task { await refresh() } }
     }
 
     func setAutoUpdate(_ on: Bool) {
@@ -104,51 +117,24 @@ final class Store: ObservableObject {
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing, previewNow == nil else { return }
         isRefreshing = true
         tick()
-        result = await fetcher.load()
+        let result = await client.load()
+        if let s = result.status { status = s }
+        loadError = result.error
         isRefreshing = false
         tick()
     }
 
     func tick() {
-        snapshot = Store.makeSnapshot(result, now: Date(), refreshing: isRefreshing)
+        snapshot = Snapshot(status: status ?? .empty, now: previewNow ?? Date().moment, refreshing: isRefreshing)
         let check = snapshot.check
         if notifyOnChange, isBundled,
-           let m = Alerts.decide(lastSeen, check: check, next: snapshot.next, now: snapshot.now) {
+           let m = Notifications.decide(lastSeen, check: check, next: snapshot.next, now: snapshot.now) {
             send(m.title, m.body)
         }
-        if !Alerts.waiting(check) { lastSeen = Alerts.seen(check, next: snapshot.next) }
-    }
-
-    var engine: Engine { Engine(info: result.info) }
-
-    private static func makeSnapshot(_ result: FetchResult, now: Date, refreshing: Bool) -> Snapshot {
-        let engine = Engine(info: result.info)
-        let today = Seattle.day(of: now)
-        let tomorrowDate = Seattle.calendar.date(byAdding: .day, value: 1, to: now) ?? now
-        let tomorrow = Seattle.day(of: tomorrowDate)
-        let changes = engine.upcomingChanges(from: now, limit: 4)
-
-        var doubtful = Set<DayKey>()
-        for offset in 0...7 {
-            guard let d = Seattle.calendar.date(byAdding: .day, value: offset, to: now) else { continue }
-            let day = Seattle.day(of: d)
-            if !Trust.dayConcerns(result.info, day: day, today: today).isEmpty { doubtful.insert(day) }
-        }
-
-        return Snapshot(
-            now: now,
-            check: Trust.assess(result, now: now, refreshing: refreshing),
-            changes: changes,
-            today: engine.segments(for: today),
-            tomorrow: engine.segments(for: tomorrow),
-            tomorrowConcerns: Trust.dayConcerns(result.info, day: tomorrow, today: today),
-            doubtfulDays: doubtful,
-            activeClosure: engine.closure(at: now),
-            earlyCloseTonight: engine.earlyCloseTime(on: today)
-        )
+        if !Notifications.waiting(check) { lastSeen = Notifications.seen(check, next: snapshot.next) }
     }
 
     // MARK: Notifications

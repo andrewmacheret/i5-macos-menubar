@@ -2,6 +2,23 @@ import AppKit
 import I5Core
 import SwiftUI
 
+/// What's open in the popover. A class, since the Command Line Tools can't expand SwiftUI's @State macro.
+final class PopoverState: ObservableObject {
+    /// Closed until asked, so no pictures load until then
+    @Published var camerasOpen: Bool
+    @Published var allCameras: Bool
+    @Published var scrollToCameras = false
+    /// Planned notices showing all their times, by position
+    @Published var allTimes: Set<Int> = []
+    /// Planned notices showing WSDOT's own words, by position
+    @Published var openWords: Set<Int> = []
+
+    init(camerasOpen: Bool, allCameras: Bool) {
+        self.camerasOpen = camerasOpen
+        self.allCameras = allCameras
+    }
+}
+
 struct PopoverView: View {
     @ObservedObject var store: Store
     var openMenu: () -> Void = {}
@@ -9,10 +26,21 @@ struct PopoverView: View {
     var gearMoved: (CGRect) -> Void = { _ in }
     @Environment(\.snapshotting) private var snapshotting
 
+    @StateObject private var ui: PopoverState
+
+    private static let camerasID = "cameras"
+
+    init(store: Store, openMenu: @escaping () -> Void = {}, gearMoved: @escaping (CGRect) -> Void = { _ in },
+         camerasOpen: Bool = false, allCameras: Bool = false) {
+        self.store = store
+        self.openMenu = openMenu
+        self.gearMoved = gearMoved
+        _ui = StateObject(wrappedValue: PopoverState(camerasOpen: camerasOpen, allCameras: allCameras))
+    }
+
     private var snap: Snapshot { store.snapshot }
     private var check: Assessment { snap.check }
-    private var info: ExpressLanesInfo { store.result.info }
-    private var today: DayKey { Seattle.day(of: snap.now) }
+    private var loaded: Bool { store.status != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,23 +51,42 @@ struct PopoverView: View {
             if snapshotting {
                 content
             } else {
-                ScrollView { content }
-                    .frame(maxHeight: 540)
+                ScrollViewReader { proxy in
+                    ScrollView { content }
+                        .frame(maxHeight: maxHeight)
+                        .onChange(of: ui.scrollToCameras) { _, go in
+                            guard go else { return }
+                            ui.scrollToCameras = false
+                            DispatchQueue.main.async {
+                                withAnimation { proxy.scrollTo(Self.camerasID, anchor: .top) }
+                            }
+                        }
+                }
             }
             Divider()
             footer
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
-        .frame(width: 370)
+        .frame(width: 400)
         .coordinateSpace(.named("popover"))
+        .onChange(of: store.popoverShown) { _, shown in
+            if !shown { ui.camerasOpen = false }
+        }
+    }
+
+    /// Leaves room for the menu bar, header and footer on small screens
+    private var maxHeight: CGFloat {
+        min(620, (NSScreen.main?.visibleFrame.height ?? 900) - 220)
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if check.verdict == .uncertain { concerns }
+            if loaded, check.verdict == .uncertain { concerns }
             notices
             timelines
+            travelTimes
+            cameras
             comingUp
             planned
             regularSchedule
@@ -51,34 +98,24 @@ struct PopoverView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
+        let h = Page.header(snap, loading: !loaded, loadError: store.isRefreshing ? nil : store.loadError)
+        return HStack(alignment: .center, spacing: 14) {
             Image(nsImage: Icon.current(check, height: 46, soon: snap.changingSoon))
             VStack(alignment: .leading, spacing: 2) {
                 Text(caption)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .tracking(0.6)
-                switch check.verdict {
-                case .confident:
-                    Text(check.scheduled.title)
+                HStack(spacing: 8) {
+                    Text(h.title)
                         .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(check.scheduled.color)
-                    Text(subtitle).font(.callout).foregroundStyle(.secondary)
-                case .checking:
-                    HStack(spacing: 8) {
-                        Text("Checking…").font(.system(size: 26, weight: .bold, design: .rounded))
-                        if !snapshotting { ProgressView().controlSize(.small) }
-                    }
-                    Text("Reading WSDOT's latest schedule").font(.callout).foregroundStyle(.secondary)
-                case .uncertain:
-                    Text("Can't confirm")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(.orange)
-                    Text("Posted schedule says \(check.scheduled.title.lowercased()), but don't rely on it")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(h.tone.color)
+                    if h.tone == .unknown, !snapshotting { ProgressView().controlSize(.small) }
                 }
+                Text(h.subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -86,14 +123,7 @@ struct PopoverView: View {
 
     /// Mentions Seattle time when the Mac is set to another time zone
     private var caption: String {
-        let differs = TimeZone.current.secondsFromGMT(for: snap.now) != Seattle.timeZone.secondsFromGMT(for: snap.now)
-        return differs ? "I-5 EXPRESS LANES · SEATTLE TIME" : "I-5 EXPRESS LANES"
-    }
-
-    private var subtitle: String {
-        guard let next = snap.next else { return "No changes in the next week" }
-        let verb = next.to == .closed ? "Closes" : (check.scheduled == .closed ? "Opens \(next.to.title.lowercased())" : "Switches \(next.to.title.lowercased())")
-        return "\(verb) at \(Format.when(next.date, now: snap.now)) · \(Format.countdown(to: next.date, from: snap.now))"
+        Seattle.differsFromLocal(snap.now) ? "I-5 EXPRESS LANES · SEATTLE TIME" : "I-5 EXPRESS LANES"
     }
 
     // MARK: Concerns
@@ -103,12 +133,22 @@ struct PopoverView: View {
             ForEach(check.concerns, id: \.self) { c in
                 Callout(icon: "exclamationmark.triangle.fill", tint: .orange, title: c.title, text: c.detail, link: c.link)
             }
-            Text("Check a live source before you drive:")
-                .font(.callout.weight(.medium))
+            Text(Page.liveSourcesLead)
+                .font(.callout.weight(.semibold))
                 .padding(.top, 2)
-            HStack(spacing: 14) {
-                WebLink("Traffic cameras", Sources.travelMap)
-                WebLink("@wsdot_traffic", Sources.wsdotTrafficX)
+            HStack(spacing: 6) {
+                WebLink("WSDOT Traffic on Bluesky", Sources.wsdotTraffic)
+                Text("·").foregroundStyle(.secondary)
+                switch Page.trafficCameras(snap.status) {
+                case .section:
+                    TextButton("Traffic cameras") {
+                        ui.camerasOpen = true
+                        ui.scrollToCameras = true
+                    }
+                case .url(let url):
+                    WebLink("Traffic cameras", url)
+                }
+                Text("·").foregroundStyle(.secondary)
                 WebLink("WSDOT page", Sources.expressLanes)
             }
             .font(.callout)
@@ -118,22 +158,12 @@ struct PopoverView: View {
     // MARK: Notices
 
     @ViewBuilder private var notices: some View {
-        let showEarly = snap.earlyCloseTonight.map { Seattle.time(of: snap.now) < $0 } ?? false
-        let oldNotices = info.advisories.filter { $0.isOver(before: today) }
-        if snap.activeClosure != nil || showEarly || !oldNotices.isEmpty {
+        let items = Page.noticesToday(snap)
+        if !items.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                if let c = snap.activeClosure {
-                    Callout(icon: "xmark.octagon.fill", tint: .red, title: c.title,
-                            text: "Closed until \(Format.when(c.end, now: snap.now)).")
-                }
-                if showEarly, let t = snap.earlyCloseTonight {
-                    Callout(icon: "moon.fill", tint: .orange, title: "Closing early tonight",
-                            text: "The lanes close at \(t.label) for construction.")
-                }
-                ForEach(oldNotices, id: \.self) { a in
-                    Callout(icon: "clock.arrow.circlepath", tint: .gray,
-                            title: "Old notice still on WSDOT's page",
-                            text: a.text, link: a.link)
+                ForEach(items, id: \.self) { item in
+                    let tone = Page.tone(item.notice.kind)
+                    Callout(icon: tone.icon, tint: tone.color, title: item.notice.title, text: item.text, link: item.notice.link)
                 }
             }
         }
@@ -143,9 +173,10 @@ struct PopoverView: View {
 
     private var timelines: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(check.verdict == .confident ? "Schedule" : "Posted schedule · not confirmed")
-            TimelineRow(label: "Today", warning: nil, segments: snap.today, nowMarker: Seattle.time(of: snap.now))
-            TimelineRow(label: "Tomorrow", warning: snap.tomorrowConcerns.first?.title, segments: snap.tomorrow, nowMarker: nil)
+            SectionTitle(Page.timelineTitle(snap))
+            TimelineRow(label: "Today", warning: Page.todayDoubt(snap)?.title, segments: snap.todaySegments,
+                        nowMarker: Seattle.time(snap.now))
+            TimelineRow(label: "Tomorrow", warning: snap.tomorrowDoubts.first?.title, segments: snap.tomorrowSegments, nowMarker: nil)
             HStack(spacing: 14) {
                 Legend(color: LaneStatus.southbound.color, text: "Southbound")
                 Legend(color: LaneStatus.northbound.color, text: "Northbound")
@@ -157,35 +188,96 @@ struct PopoverView: View {
         .opacity(check.verdict == .confident ? 1 : 0.6)
     }
 
+    // MARK: Travel times
+
+    @ViewBuilder private var travelTimes: some View {
+        if let t = Page.travelTimes(snap) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Travel times")
+                Grid(alignment: .topLeading, horizontalSpacing: 14, verticalSpacing: 8) {
+                    GridRow {
+                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                        Text("Express lanes").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Regular lanes").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    ForEach(t.rows, id: \.self) { row in
+                        GridRow {
+                            Text(row.label).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.express).monospacedDigit()
+                                if let saves = row.saves {
+                                    Text("saves \(saves) min").font(.caption).foregroundStyle(LaneStatus.northbound.color)
+                                }
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.regular).monospacedDigit()
+                                if let usual = row.times.usual {
+                                    Text("usually \(usual)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .font(.callout)
+                Hint(t.hint)
+            }
+        }
+    }
+
+    // MARK: Cameras
+
+    @ViewBuilder private var cameras: some View {
+        let all = snap.status.cameras
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Cameras")
+                TextButton(Cameras.summary(all, open: ui.camerasOpen), chevron: ui.camerasOpen ? "chevron.down" : "chevron.right") {
+                    ui.camerasOpen.toggle()
+                }
+                .font(.callout)
+                if ui.camerasOpen {
+                    CameraGrid(cameras: Cameras.shown(all, all: ui.allCameras), now: snap.now)
+                    if let toggle = Cameras.toggleText(all, all: ui.allCameras) {
+                        TextButton(toggle) { ui.allCameras.toggle() }
+                            .font(.callout)
+                    }
+                    Hint(Cameras.hint)
+                }
+            }
+            .id(Self.camerasID)
+        }
+    }
+
     // MARK: Coming up
 
     private var comingUp: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let changes = Page.comingUp(snap)
+        return VStack(alignment: .leading, spacing: 6) {
             SectionTitle("Coming up")
-            ForEach(snap.changes, id: \.self) { change in
-                let doubtful = snap.doubtfulDays.contains(Seattle.day(of: change.date))
+            if changes.isEmpty {
+                Hint("No changes coming up.")
+            }
+            ForEach(changes, id: \.self) { change in
                 HStack(spacing: 8) {
                     Circle().fill(change.to.color).frame(width: 8, height: 8)
                     Text(change.to.title).fontWeight(.medium)
-                    if doubtful {
+                    if Page.doubtful(snap, change.at) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
-                            .help("This day may not follow the regular schedule")
+                            .help("This day may not go as planned")
                     }
                     Spacer()
-                    Text(Format.when(change.date, now: snap.now))
+                    Text(Format.when(change.at, now: snap.now))
                         .monospacedDigit()
-                    Text(Format.countdown(to: change.date, from: snap.now))
+                    Text(Format.countdown(to: change.at, from: snap.now))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(width: 58, alignment: .trailing)
                 }
                 .font(.callout)
             }
-            if snap.changes.contains(where: { snap.doubtfulDays.contains(Seattle.day(of: $0.date)) }) {
-                Text("⚠ marks days that may not follow the regular schedule.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if changes.contains(where: { Page.doubtful(snap, $0.at) }) {
+                Hint("⚠ marks days that may not go as planned.")
             }
         }
     }
@@ -193,58 +285,16 @@ struct PopoverView: View {
     // MARK: Planned changes
 
     @ViewBuilder private var planned: some View {
-        let closures = store.engine.upcomingClosures(from: snap.now)
-        let early = store.engine.upcomingEarlyCloses(from: snap.now)
-        let unclear = info.events.filter { $0.closure == nil && !($0.days?.isOver(before: today) ?? false) }
-        let futureNotices = info.advisories.filter { a in a.days.map { today < $0.first } ?? false }
-        let holidays = upcomingHolidays
-        if !closures.isEmpty || !early.isEmpty || !unclear.isEmpty || !futureNotices.isEmpty || !holidays.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+        if let p = Page.planned(snap) {
+            VStack(alignment: .leading, spacing: 12) {
                 SectionTitle("Planned changes")
-                ForEach(closures, id: \.self) { c in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label(c.title, systemImage: "calendar.badge.exclamationmark").fontWeight(.medium)
-                        Text("Closed \(Format.shortDate(c.start)) \(Format.clock(c.start)) → \(Format.shortDate(c.end)) \(Format.clock(c.end))")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    .font(.callout)
+                ForEach(Array(p.notices.enumerated()), id: \.offset) { i, item in
+                    plannedNotice(i, item)
                 }
-                ForEach(unclear, id: \.self) { e in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label(e.title, systemImage: "questionmark.circle").fontWeight(.medium)
-                        Text("Exact times unclear. The app won't confirm a direction on these days.")
-                            .foregroundStyle(.orange)
-                        if !e.detail.isEmpty {
-                            Text(e.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .font(.callout)
-                }
-                ForEach(futureNotices, id: \.self) { a in
-                    Label(a.text, systemImage: "info.circle")
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !early.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Closing early", systemImage: "moon").fontWeight(.medium)
-                        Text(early.map(earlyLabel).joined(separator: "  ·  "))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.callout)
-                }
-                if !holidays.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Holidays", systemImage: "star").fontWeight(.medium)
-                        Text(holidays.map { "\($0.1) (\(Format.shortDate($0.0)))" }.joined(separator: "  ·  "))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("WSDOT doesn't post holiday hours, so the app won't confirm a direction on these days.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                ForEach(p.holidays, id: \.self) { h in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(h.title).fontWeight(.semibold)
+                        Text(h.detail).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.callout)
                 }
@@ -252,27 +302,58 @@ struct PopoverView: View {
         }
     }
 
-    private func earlyLabel(_ e: EarlyClose) -> String {
-        "\(Format.shortDate(e.day)) at \(e.time?.label ?? "unknown time")"
-    }
-
-    /// Holidays in the next 14 days
-    private var upcomingHolidays: [(DayKey, String)] {
-        (0...14).compactMap { offset in
-            guard let d = Seattle.calendar.date(byAdding: .day, value: offset, to: snap.now) else { return nil }
-            let day = Seattle.day(of: d)
-            return Holidays.name(for: day).map { (day, $0) }
+    private func plannedNotice(_ i: Int, _ item: Page.PlannedNotice) -> some View {
+        let showAll = ui.allTimes.contains(i)
+        let times = showAll ? item.times : item.shownTimes
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(item.notice.title).font(.callout.weight(.semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(times.enumerated()), id: \.offset) { _, t in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("•")
+                        Text(t).monospacedDigit()
+                    }
+                }
+                if !showAll, let more = item.moreLabel {
+                    TextButton("…") { ui.allTimes.insert(i) }
+                        .padding(.leading, 12)
+                        .help(more)
+                        .accessibilityLabel(more)
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            if let note = item.note {
+                Text(note).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            let open = ui.openWords.contains(i)
+            TextButton(item.wordsTitle, chevron: open ? "chevron.down" : "chevron.right") {
+                if open { ui.openWords.remove(i) } else { ui.openWords.insert(i) }
+            }
+            .font(.callout)
+            if open {
+                Text(item.notice.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            if let link = item.moreInfo {
+                WebLink("More info", link).font(.callout)
+            }
         }
     }
 
     // MARK: Regular schedule
 
     private var regularSchedule: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let r = Page.regularSchedule(snap)
+        return VStack(alignment: .leading, spacing: 6) {
             SectionTitle("Regular schedule")
+            if let hint = r.hint { Hint(hint) }
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                ScheduleRow(label: "Mon–Fri", windows: info.schedule.weekday)
-                ScheduleRow(label: "Sat–Sun", windows: info.schedule.weekend)
+                ScheduleRow(label: "Mon–Fri", windows: r.schedule.weekday)
+                ScheduleRow(label: "Sat–Sun", windows: r.schedule.weekend)
             }
             .font(.callout)
         }
@@ -283,37 +364,18 @@ struct PopoverView: View {
     private var sources: some View {
         VStack(alignment: .leading, spacing: 6) {
             SectionTitle("Sources")
-            SourceLink(title: "WSDOT express lanes schedule", subtitle: "Where this data comes from", url: Sources.expressLanes)
-            ForEach(eventLinks, id: \.self) { url in
-                let bulletin = url.host()?.contains("govdelivery") == true
-                SourceLink(title: bulletin ? "WSDOT bulletin" : "Construction project page", subtitle: url.host() ?? "", url: url)
+            ForEach(Page.sources(snap), id: \.self) { s in
+                SourceLink(title: s.title, subtitle: s.subtitle, url: s.url)
             }
-            SourceLink(title: "Revive I-5", subtitle: "Ship Canal Bridge work", url: Sources.reviveI5)
-            SourceLink(title: "WSDOT real-time travel map", subtitle: "Live traffic, alerts and cameras", url: Sources.travelMap)
-            SourceLink(title: "@wsdot_traffic", subtitle: "Unplanned closures get posted here first", url: Sources.wsdotTrafficX)
-            Text("""
-            The app only shows N or S when it read WSDOT's page in the last 2 hours, the page made sense, \
-            and nothing on it hints that today is different. Otherwise it shows ⚠. \
-            It can't know about closures WSDOT hasn't posted yet.
-            """)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 4)
+            Hint(Page.sourcesHint).padding(.top, 4)
         }
-    }
-
-    private var eventLinks: [URL] {
-        var seen = Set<URL>()
-        return (info.events.compactMap(\.link) + info.advisories.compactMap(\.link))
-            .filter { $0 != Sources.reviveI5 && $0 != Sources.expressLanes && seen.insert($0).inserted }
     }
 
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 10) {
-            sourceStatus
+        HStack(alignment: .top, spacing: 10) {
+            dataStatus
             Spacer()
             if snapshotting {
                 Image(systemName: "arrow.clockwise")
@@ -335,7 +397,7 @@ struct PopoverView: View {
             }
         }
         .buttonStyle(.borderless)
-        .help("Refresh from WSDOT")
+        .help("Refresh")
         .keyboardShortcut("r")
 
         // Opens the same menu as right-clicking the icon
@@ -347,21 +409,22 @@ struct PopoverView: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("popover")) } action: { gearMoved($0) }
     }
 
-    private var sourceStatus: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            switch store.result.source {
-            case .live(let d):
-                Label("Checked WSDOT at \(Format.clock(d))", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            case .cached(let d):
-                Label("Using copy saved \(Format.when(d, now: snap.now))", systemImage: "wifi.slash")
-                    .foregroundStyle(.orange)
-            case .builtIn:
-                Label("Built-in schedule only", systemImage: "wifi.slash")
-                    .foregroundStyle(.orange)
+    private var dataStatus: some View {
+        let status = !loaded && store.loadError != nil
+            ? (text: "Nothing saved yet", warn: true)
+            : Page.dataStatus(snap, loaded: loaded)
+        return VStack(alignment: .leading, spacing: 2) {
+            Label(status.text, systemImage: status.warn ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(status.warn ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                .fixedSize(horizontal: false, vertical: true)
+            if let reading = Page.readingText(snap) {
+                Text(reading).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if let e = store.settingsMessage ?? store.result.error {
-                Text(e).foregroundStyle(.red).lineLimit(2)
+            if let live = Page.liveText(snap) {
+                Text(live).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let e = store.settingsMessage ?? store.loadError {
+                Text(e).foregroundStyle(.red).lineLimit(3)
             }
         }
         .font(.caption)
@@ -369,6 +432,36 @@ struct PopoverView: View {
 }
 
 // MARK: Pieces
+
+extension Page.Tone {
+    var color: Color {
+        switch self {
+        case .northbound: LaneStatus.northbound.color
+        case .southbound: LaneStatus.southbound.color
+        case .closed: LaneStatus.closed.color
+        case .unknown: .secondary
+        case .warning: .orange
+        }
+    }
+}
+
+extension Page.NoticeTone {
+    var color: Color {
+        switch self {
+        case .bad: .red
+        case .warn: .orange
+        case .muted: .gray
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .bad: "xmark.octagon.fill"
+        case .warn: "exclamationmark.triangle.fill"
+        case .muted: "clock.arrow.circlepath"
+        }
+    }
+}
 
 private struct SectionTitle: View {
     let text: String
@@ -382,12 +475,24 @@ private struct SectionTitle: View {
     }
 }
 
+private struct Hint: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct Callout: View {
     let icon: String
     let tint: Color
     let title: String
     let text: String
-    var link: URL? = nil
+    var link: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -415,7 +520,7 @@ private struct Callout: View {
 private struct TimelineRow: View {
     let label: String
     let warning: String?
-    let segments: [Segment]
+    let segments: [DaySegment]
     let nowMarker: TimeOfDay?
 
     var body: some View {
@@ -435,11 +540,17 @@ private struct TimelineRow: View {
                     ZStack(alignment: .leading) {
                         Rectangle().fill(LaneStatus.closed.timelineColor)
                         ForEach(segments, id: \.self) { s in
-                            Rectangle()
-                                .fill(s.status.timelineColor)
-                                .frame(width: max(1, w * fraction(s.end) - w * fraction(s.start)))
-                                .offset(x: w * fraction(s.start))
-                                .help("\(s.status.title) \(s.start.label)–\(s.end.label)")
+                            Group {
+                                if s.status == .unknown {
+                                    Stripes().stroke(Color.secondary.opacity(0.45), lineWidth: 1.5)
+                                } else {
+                                    Rectangle().fill(s.status.timelineColor)
+                                }
+                            }
+                            .frame(width: max(1, w * fraction(s.end) - w * fraction(s.start)))
+                            .clipped()
+                            .offset(x: w * fraction(s.start))
+                            .help("\(s.status.title) \(timeLabel(s.start))–\(timeLabel(s.end))")
                         }
                     }
                     .frame(width: w, height: 14, alignment: .leading)
@@ -456,6 +567,8 @@ private struct TimelineRow: View {
                 .frame(width: w, height: 20, alignment: .leading)
             }
             .frame(height: 20)
+            .accessibilityElement()
+            .accessibilityLabel("\(label): \(Page.timelineSummary(segments))")
             HStack {
                 ForEach(Array(["12a", "6a", "12p", "6p", "12a"].enumerated()), id: \.offset) { i, mark in
                     if i > 0 { Spacer() }
@@ -468,7 +581,21 @@ private struct TimelineRow: View {
     }
 
     private func fraction(_ t: TimeOfDay) -> CGFloat {
-        CGFloat(t.minutes) / CGFloat(24 * 60)
+        CGFloat(t) / CGFloat(24 * 60)
+    }
+}
+
+/// Diagonal lines for times the timeline doesn't cover
+private struct Stripes: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            p.move(to: CGPoint(x: x, y: rect.maxY))
+            p.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+            x += 6
+        }
+        return p
     }
 }
 
@@ -495,7 +622,7 @@ private struct ScheduleRow: View {
                 ForEach(windows, id: \.self) { w in
                     HStack(spacing: 6) {
                         Circle().fill(w.status.color).frame(width: 7, height: 7)
-                        Text("\(w.status.title)  \(w.start.label) – \(w.end.label)")
+                        Text("\(w.status.title)  \(timeLabel(w.start)) – \(timeLabel(w.end))")
                             .monospacedDigit()
                     }
                 }
@@ -504,28 +631,137 @@ private struct ScheduleRow: View {
     }
 }
 
+/// Two pictures per row, express lane cameras first
+private struct CameraGrid: View {
+    let cameras: [Camera]
+    let now: Moment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(stride(from: 0, to: cameras.count, by: 2)), id: \.self) { i in
+                HStack(alignment: .top, spacing: 10) {
+                    CameraCell(camera: cameras[i], now: now)
+                    if i + 1 < cameras.count {
+                        CameraCell(camera: cameras[i + 1], now: now)
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CameraCell: View {
+    let camera: Camera
+    let now: Moment
+    @Environment(\.snapshotting) private var snapshotting
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Group {
+                if snapshotting {
+                    picture
+                } else {
+                    // Opens the full picture in the browser
+                    Button { open(camera.image) } label: { picture }
+                        .buttonStyle(.plain)
+                        .linkCursor()
+                        .help("Open the full picture")
+                }
+            }
+            Text(camera.name).font(.caption.weight(.semibold)).lineLimit(2)
+            HStack(spacing: 4) {
+                Text(Cameras.milepost(camera))
+                Text("·")
+                WebLink("map", Cameras.mapLink(camera))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var picture: some View {
+        CameraPicture(camera: camera, url: Cameras.imageURL(camera, now: now))
+    }
+}
+
+/// WSDOT's picture. Keeps showing the old one while a new one loads.
+private struct CameraPicture: View {
+    let camera: Camera
+    let url: String
+    @Environment(\.snapshotting) private var snapshotting
+    @Environment(\.cameraImages) private var preloaded
+    @StateObject private var loader = PictureLoader()
+
+    var body: some View {
+        let shown = loader.image ?? preloaded[camera.image]
+        // A fixed height, since the scrolling popover gives no height to fit into
+        Rectangle().fill(Color.secondary.opacity(0.15))
+            .frame(maxWidth: .infinity)
+            .frame(height: 132)
+            .overlay {
+                if let shown {
+                    Image(nsImage: shown).resizable().scaledToFill()
+                } else if loader.failed || snapshotting {
+                    Image(systemName: "photo").font(.title2).foregroundStyle(.tertiary)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityLabel("WSDOT camera at \(camera.name)")
+        .task(id: url) {
+            if !snapshotting { await loader.load(url) }
+        }
+    }
+}
+
+@MainActor private final class PictureLoader: ObservableObject {
+    @Published var image: NSImage?
+    @Published var failed = false
+
+    func load(_ url: String) async {
+        guard let u = URL(string: url) else { return }
+        var req = URLRequest(url: u, timeoutInterval: 20)
+        req.setValue(Store.userAgent, forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            if let loaded = NSImage(data: data) {
+                image = loaded
+                failed = false
+                return
+            }
+        } catch {
+            if Task.isCancelled { return }
+        }
+        if image == nil { failed = true }
+    }
+}
+
 private struct SourceLink: View {
     let title: String
     let subtitle: String
-    let url: URL
+    let url: String
 
     @Environment(\.snapshotting) private var snapshotting
 
     var body: some View {
         Group {
             if snapshotting {
-                label.foregroundStyle(Color.accentColor)
-            } else {
-                Link(destination: url) { label }.linkCursor()
+                label
+            } else if let u = URL(string: url) {
+                Link(destination: u) { label }.linkCursor()
             }
         }
         .font(.callout)
-        .help(url.absoluteString)
+        .help(url)
     }
 
     private var label: some View {
         HStack(spacing: 8) {
-            Image(systemName: "arrow.up.right.square")
+            Image(systemName: "arrow.up.right.square").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).foregroundStyle(Color.accentColor)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
@@ -537,10 +773,10 @@ private struct SourceLink: View {
 /// A text link. Snapshots draw it as plain text, since ImageRenderer can't draw links.
 private struct WebLink: View {
     let title: String
-    let url: URL
+    let url: String
     @Environment(\.snapshotting) private var snapshotting
 
-    init(_ title: String, _ url: URL) {
+    init(_ title: String, _ url: String) {
         self.title = title
         self.url = url
     }
@@ -548,10 +784,49 @@ private struct WebLink: View {
     var body: some View {
         if snapshotting {
             Text(title).foregroundStyle(Color.accentColor)
-        } else {
-            Link(title, destination: url).linkCursor()
+        } else if let u = URL(string: url) {
+            Link(title, destination: u).linkCursor().help(url)
         }
     }
+}
+
+/// A button that looks like a link, for things that open in the popover
+private struct TextButton: View {
+    let title: String
+    var chevron: String?
+    let action: () -> Void
+    @Environment(\.snapshotting) private var snapshotting
+
+    init(_ title: String, chevron: String? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.chevron = chevron
+        self.action = action
+    }
+
+    var body: some View {
+        if snapshotting {
+            label
+        } else {
+            Button(action: action) { label }
+                .buttonStyle(.plain)
+                .linkCursor()
+        }
+    }
+
+    private var label: some View {
+        HStack(spacing: 4) {
+            if let chevron {
+                Image(systemName: chevron).font(.caption2.weight(.semibold)).frame(width: 10)
+            }
+            Text(title)
+        }
+        .foregroundStyle(Color.accentColor)
+        .contentShape(Rectangle())
+    }
+}
+
+@MainActor private func open(_ url: String) {
+    if let u = URL(string: url) { NSWorkspace.shared.open(u) }
 }
 
 extension View {
@@ -572,10 +847,20 @@ private struct SnapshottingKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct CameraImagesKey: EnvironmentKey {
+    static let defaultValue: [String: NSImage] = [:]
+}
+
 extension EnvironmentValues {
     /// True while rendering PNG snapshots
     var snapshotting: Bool {
         get { self[SnapshottingKey.self] }
         set { self[SnapshottingKey.self] = newValue }
+    }
+
+    /// Camera pictures downloaded ahead of time for snapshots, by their address
+    var cameraImages: [String: NSImage] {
+        get { self[CameraImagesKey.self] }
+        set { self[CameraImagesKey.self] = newValue }
     }
 }
