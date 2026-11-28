@@ -267,6 +267,42 @@ func allText(_ snap: Snapshot, loaded: Bool = true) -> String {
         #expect(Cameras.imageURL(c, now: f.at + 5 * 60_000) != url)
     }
 
+    @Test func addTheReloadCountToThePictureAddressAfterTheFirstTry() {
+        let c = cameras[1]
+        let v = Cameras.version(f.at)
+        #expect(v == f.at / (5 * 60_000))
+        #expect(Cameras.imageURL(c, now: f.at, reload: 0) == "\(c.image)?v=\(v)")
+        #expect(Cameras.imageURL(c, now: f.at, reload: 1) == "\(c.image)?v=\(v)-1")
+        #expect(Cameras.imageURL(c, now: f.at, reload: 3) == "\(c.image)?v=\(v)-3")
+        #expect(Cameras.imageURL(c, now: f.at + 5 * 60_000, reload: 3) == "\(c.image)?v=\(v + 1)-3")
+    }
+
+    @Test func retryAFailedPicture3TimesAfter5_15And45Seconds() {
+        #expect(Cameras.retryDelay(afterFailures: 0) == nil)
+        #expect(Cameras.retryDelay(afterFailures: 1) == 5_000)
+        #expect(Cameras.retryDelay(afterFailures: 2) == 15_000)
+        #expect(Cameras.retryDelay(afterFailures: 3) == 45_000)
+        #expect(Cameras.retryDelay(afterFailures: 4) == nil)
+    }
+
+    @Test func useTheSameWordsAsTheWebPage() {
+        #expect(Cameras.failed == "Picture didn't load")
+        #expect(Cameras.reloadHelp == "Reload picture")
+        #expect(Cameras.reloadLabel(cameras[1]) == "Reload the picture from Roanoke St Express Lanes")
+        #expect(Cameras.openInBrowser == "Open in browser")
+        #expect(Cameras.travelMapLink == "All cameras on WSDOT's travel map")
+    }
+
+    @Test func giveTheExpandedCameraARowToItself() {
+        let names = { (rows: [[Camera]]) in rows.map { $0.map(\.name) } }
+        #expect(names(Cameras.rows(cameras, expanded: nil)) == [["Yesler Way", "Roanoke St Express Lanes"], ["Ship Canal Express Lanes", "NE 45th St"]])
+        #expect(names(Cameras.rows(cameras, expanded: cameras[0].id)) == [["Yesler Way"], ["Roanoke St Express Lanes", "Ship Canal Express Lanes"], ["NE 45th St"]])
+        #expect(names(Cameras.rows(cameras, expanded: cameras[1].id)) == [["Yesler Way"], ["Roanoke St Express Lanes"], ["Ship Canal Express Lanes", "NE 45th St"]])
+        #expect(names(Cameras.rows(cameras, expanded: cameras[3].id)) == [["Yesler Way", "Roanoke St Express Lanes"], ["Ship Canal Express Lanes"], ["NE 45th St"]])
+        // A camera that isn't shown, like after switching back to express lanes only
+        #expect(names(Cameras.rows(Cameras.express(cameras), expanded: cameras[0].id)) == [["Roanoke St Express Lanes", "Ship Canal Express Lanes"]])
+    }
+
     @Test func linkToTheTravelMapZoomedInOnTheCamera() throws {
         let c = cameras[0]
         let url = try #require(URLComponents(string: Cameras.mapLink(c)))

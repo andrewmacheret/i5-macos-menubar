@@ -79,7 +79,7 @@ screenshots: app
 	rm -rf build/snapshots
 	"$(APP)/Contents/MacOS/I5Express" --snapshot build/snapshots --fixtures Tests/I5CoreTests/Fixtures
 	mkdir -p docs
-	cp build/snapshots/popover-confident-dark.png docs/popover-confirmed.png
+	cp build/snapshots/popover-confident-expanded-dark.png docs/popover-confirmed.png
 	cp build/snapshots/popover-holiday-dark.png docs/popover-cant-confirm.png
 	cd build/snapshots && cp icons-*.png menubar-*.png notifications-*.png menus-*.png ../../docs/
 	cp build/AppIcon.iconset/icon_128x128@2x.png docs/app-icon.png

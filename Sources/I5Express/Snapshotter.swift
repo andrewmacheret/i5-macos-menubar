@@ -36,20 +36,23 @@ enum Snapshotter {
         let pictures = download(Cameras.express(confident.status.cameras).map(\.image))
 
         func preview(_ f: Fixture) -> Store { Store(preview: f.status, now: f.at) }
-        let scenarios: [(String, Store, Bool)] = [
-            ("confident", preview(confident), true),
-            ("holiday", preview(holiday), false),
-            ("checking", preview(checking), false),
-            ("failed", preview(failed), false),
-            ("stale", preview(stale), false),
-            ("winter-2022", preview(winter), false),
-            ("revive-2026", preview(revive), false),
-            ("loading", Store(preview: nil, now: confident.at, refreshing: true), false),
-            ("offline", Store(preview: nil, now: confident.at, loadError: "Couldn't reach the server: The Internet connection appears to be offline."), false),
+        // The second express lane camera shows expanded in the README picture
+        let expanded = Cameras.express(confident.status.cameras).dropFirst().first?.id
+        let scenarios: [(String, Store, Bool, Int?)] = [
+            ("confident", preview(confident), true, nil),
+            ("confident-expanded", preview(confident), true, expanded),
+            ("holiday", preview(holiday), false, nil),
+            ("checking", preview(checking), false, nil),
+            ("failed", preview(failed), false, nil),
+            ("stale", preview(stale), false, nil),
+            ("winter-2022", preview(winter), false, nil),
+            ("revive-2026", preview(revive), false, nil),
+            ("loading", Store(preview: nil, now: confident.at, refreshing: true), false, nil),
+            ("offline", Store(preview: nil, now: confident.at, loadError: "Couldn't reach the server: The Internet connection appears to be offline."), false, nil),
         ]
-        for (name, store, camerasOpen) in scenarios {
+        for (name, store, camerasOpen, expandedCamera) in scenarios {
             for scheme in [ColorScheme.light, .dark] {
-                let view = PopoverView(store: store, camerasOpen: camerasOpen)
+                let view = PopoverView(store: store, camerasOpen: camerasOpen, expandedCamera: expandedCamera)
                     .environment(\.snapshotting, true)
                     .environment(\.cameraImages, pictures)
                     .environment(\.colorScheme, scheme)
@@ -66,7 +69,7 @@ enum Snapshotter {
         let quarterPast = Seattle.instant("2026-11-19", hm(11, 15))
         let elevenPM = Seattle.instant("2026-11-19", hm(23))
         let change = Notifications.change(.northbound, next: Change(at: elevenPM, to: .closed), now: quarterPast)
-        let cantConfirm = Notifications.cantConfirm(scenarios[1].1.snapshot.check)
+        let cantConfirm = Notifications.cantConfirm(scenarios[2].1.snapshot.check)
 
         let extras: [(String, AnyView)] = [
             ("icons", AnyView(IconStates())),

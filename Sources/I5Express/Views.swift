@@ -8,14 +8,33 @@ final class PopoverState: ObservableObject {
     @Published var camerasOpen: Bool
     @Published var allCameras: Bool
     @Published var scrollToCameras = false
+    /// The camera showing full width, by id
+    @Published var expandedCamera: Int?
     /// Planned notices showing all their times, by position
     @Published var allTimes: Set<Int> = []
     /// Planned notices showing WSDOT's own words, by position
     @Published var openWords: Set<Int> = []
+    /// Each camera's picture and retries, kept here so expanding a camera doesn't load it again
+    private var pictures: [Int: PictureLoader] = [:]
 
-    init(camerasOpen: Bool, allCameras: Bool) {
+    init(camerasOpen: Bool, allCameras: Bool, expandedCamera: Int? = nil) {
         self.camerasOpen = camerasOpen
         self.allCameras = allCameras
+        self.expandedCamera = expandedCamera
+    }
+
+    @MainActor func picture(_ id: Int) -> PictureLoader {
+        if let p = pictures[id] { return p }
+        let p = PictureLoader()
+        pictures[id] = p
+        return p
+    }
+
+    /// Forgets the pictures, so the next open starts fresh
+    func closeCameras() {
+        camerasOpen = false
+        expandedCamera = nil
+        pictures = [:]
     }
 }
 
@@ -31,12 +50,19 @@ struct PopoverView: View {
     private static let camerasID = "cameras"
 
     init(store: Store, openMenu: @escaping () -> Void = {}, gearMoved: @escaping (CGRect) -> Void = { _ in },
-         camerasOpen: Bool = false, allCameras: Bool = false) {
+         camerasOpen: Bool = false, allCameras: Bool = false, expandedCamera: Int? = nil) {
         self.store = store
         self.openMenu = openMenu
         self.gearMoved = gearMoved
-        _ui = StateObject(wrappedValue: PopoverState(camerasOpen: camerasOpen, allCameras: allCameras))
+        _ui = StateObject(wrappedValue: PopoverState(camerasOpen: camerasOpen, allCameras: allCameras, expandedCamera: expandedCamera))
     }
+
+    static func cameraID(_ id: Int) -> String { "camera-\(id)" }
+
+    private static let width: CGFloat = 400
+    private static let padding: CGFloat = 16
+    /// How wide the sections are, inside the padding
+    static let contentWidth = width - 2 * padding
 
     private var snap: Snapshot { store.snapshot }
     private var check: Assessment { snap.check }
@@ -61,6 +87,13 @@ struct PopoverView: View {
                                 withAnimation { proxy.scrollTo(Self.camerasID, anchor: .top) }
                             }
                         }
+                        // Keeps the bigger picture in view, scrolling as little as it can
+                        .onChange(of: ui.expandedCamera) { _, id in
+                            guard let id else { return }
+                            DispatchQueue.main.async {
+                                withAnimation { proxy.scrollTo(Self.cameraID(id)) }
+                            }
+                        }
                 }
             }
             Divider()
@@ -68,10 +101,10 @@ struct PopoverView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
-        .frame(width: 400)
+        .frame(width: Self.width)
         .coordinateSpace(.named("popover"))
         .onChange(of: store.popoverShown) { _, shown in
-            if !shown { ui.camerasOpen = false }
+            if !shown { ui.closeCameras() }
         }
     }
 
@@ -92,7 +125,7 @@ struct PopoverView: View {
             regularSchedule
             sources
         }
-        .padding(16)
+        .padding(Self.padding)
     }
 
     // MARK: Header
@@ -236,12 +269,13 @@ struct PopoverView: View {
                 }
                 .font(.callout)
                 if ui.camerasOpen {
-                    CameraGrid(cameras: Cameras.shown(all, all: ui.allCameras), now: snap.now)
+                    CameraGrid(cameras: Cameras.shown(all, all: ui.allCameras), now: snap.now, ui: ui)
                     if let toggle = Cameras.toggleText(all, all: ui.allCameras) {
                         TextButton(toggle) { ui.allCameras.toggle() }
                             .font(.callout)
                     }
                     Hint(Cameras.hint)
+                    WebLink(Cameras.travelMapLink, Sources.travelMap).font(.caption)
                 }
             }
             .id(Self.camerasID)
@@ -631,30 +665,39 @@ private struct ScheduleRow: View {
     }
 }
 
-/// Two pictures per row, express lane cameras first
+/// Two pictures per row, express lane cameras first. The expanded one gets a row to itself.
 private struct CameraGrid: View {
     let cameras: [Camera]
     let now: Moment
+    @ObservedObject var ui: PopoverState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(stride(from: 0, to: cameras.count, by: 2)), id: \.self) { i in
+            ForEach(Cameras.rows(cameras, expanded: ui.expandedCamera), id: \.first?.id) { row in
                 HStack(alignment: .top, spacing: 10) {
-                    CameraCell(camera: cameras[i], now: now)
-                    if i + 1 < cameras.count {
-                        CameraCell(camera: cameras[i + 1], now: now)
-                    } else {
+                    ForEach(row) { c in cell(c) }
+                    if row.count == 1, row[0].id != ui.expandedCamera {
                         Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                     }
                 }
             }
         }
     }
+
+    private func cell(_ c: Camera) -> some View {
+        CameraCell(camera: c, now: now, loader: ui.picture(c.id), expanded: c.id == ui.expandedCamera) {
+            ui.expandedCamera = ui.expandedCamera == c.id ? nil : c.id
+        }
+        .id(PopoverView.cameraID(c.id))
+    }
 }
 
 private struct CameraCell: View {
     let camera: Camera
     let now: Moment
+    @ObservedObject var loader: PictureLoader
+    let expanded: Bool
+    let toggle: () -> Void
     @Environment(\.snapshotting) private var snapshotting
 
     var body: some View {
@@ -663,11 +706,11 @@ private struct CameraCell: View {
                 if snapshotting {
                     picture
                 } else {
-                    // Opens the full picture in the browser
-                    Button { open(camera.image) } label: { picture }
+                    // Shows it bigger, or smaller again
+                    Button(action: toggle) { picture }
                         .buttonStyle(.plain)
                         .linkCursor()
-                        .help("Open the full picture")
+                        .help(expanded ? "Show a smaller picture" : "Show a bigger picture")
                 }
             }
             Text(camera.name).font(.caption.weight(.semibold)).lineLimit(2)
@@ -675,6 +718,12 @@ private struct CameraCell: View {
                 Text(Cameras.milepost(camera))
                 Text("·")
                 WebLink("map", Cameras.mapLink(camera))
+                if expanded {
+                    Text("·")
+                    WebLink(Cameras.openInBrowser, Cameras.imageURL(camera, now: now))
+                }
+                Spacer(minLength: 4)
+                reloadButton
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -683,60 +732,116 @@ private struct CameraCell: View {
     }
 
     private var picture: some View {
-        CameraPicture(camera: camera, url: Cameras.imageURL(camera, now: now))
+        CameraPicture(camera: camera, now: now, expanded: expanded, loader: loader)
+    }
+
+    @ViewBuilder private var reloadButton: some View {
+        if snapshotting {
+            Image(systemName: "arrow.clockwise").foregroundStyle(Color.accentColor)
+        } else {
+            Button { loader.reload(now: now) } label: { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless)
+                .help(Cameras.reloadHelp)
+                .accessibilityLabel(Cameras.reloadLabel(camera))
+        }
     }
 }
 
 /// WSDOT's picture. Keeps showing the old one while a new one loads.
 private struct CameraPicture: View {
     let camera: Camera
-    let url: String
+    let now: Moment
+    let expanded: Bool
+    @ObservedObject var loader: PictureLoader
     @Environment(\.snapshotting) private var snapshotting
     @Environment(\.cameraImages) private var preloaded
-    @StateObject private var loader = PictureLoader()
 
     var body: some View {
         let shown = loader.image ?? preloaded[camera.image]
-        // A fixed height, since the scrolling popover gives no height to fit into
+        // A fixed height, since the scrolling popover gives no height to fit into.
+        // The expanded one takes the picture's shape, so none of it gets cut off.
+        let shape = shown.map { $0.size.width / max(1, $0.size.height) } ?? 4 / 3
         Rectangle().fill(Color.secondary.opacity(0.15))
             .frame(maxWidth: .infinity)
-            .frame(height: 132)
+            .frame(height: expanded ? PopoverView.contentWidth / shape : 132)
             .overlay {
-                if let shown {
+                if loader.gaveUp {
+                    VStack(spacing: 4) {
+                        Image(systemName: "photo").font(.title2).foregroundStyle(.tertiary)
+                        Text(Cameras.failed).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if let shown {
                     Image(nsImage: shown).resizable().scaledToFill()
-                } else if loader.failed || snapshotting {
+                } else if snapshotting {
                     Image(systemName: "photo").font(.title2).foregroundStyle(.tertiary)
                 } else {
                     ProgressView().controlSize(.small)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6))
-        .accessibilityLabel("WSDOT camera at \(camera.name)")
-        .task(id: url) {
-            if !snapshotting { await loader.load(url) }
+        .accessibilityLabel(loader.gaveUp ? "\(Cameras.failed) from \(camera.name)" : "WSDOT camera at \(camera.name)")
+        .task(id: loader.url(camera, now: now)) {
+            if !snapshotting { await loader.load(camera, now: now) }
         }
     }
 }
 
-@MainActor private final class PictureLoader: ObservableObject {
-    @Published var image: NSImage?
-    @Published var failed = false
+/// One camera's picture. When it fails, it tries again after 5, 15 and 45 seconds, then gives up.
+@MainActor final class PictureLoader: ObservableObject {
+    @Published private(set) var image: NSImage?
+    /// Every try failed, so the picture's spot says so
+    @Published private(set) var gaveUp = false
+    /// Retries and reload clicks since the 5-minute version changed. Each one changes the address.
+    @Published private(set) var reloads = 0
+    private var failures = 0
+    private var version: Int?
 
-    func load(_ url: String) async {
-        guard let u = URL(string: url) else { return }
+    /// Changing it restarts the view's task, which loads the picture again
+    func url(_ camera: Camera, now: Moment) -> String {
+        Cameras.imageURL(camera, now: now, reload: Cameras.version(now) == version ? reloads : 0)
+    }
+
+    func load(_ camera: Camera, now: Moment) async {
+        newVersion(now)
+        // Opening the section again after giving up starts the retries over
+        if gaveUp {
+            failures = 0
+            gaveUp = false
+        }
+        guard let u = URL(string: url(camera, now: now)) else { return }
         var req = URLRequest(url: u, timeoutInterval: 20)
         req.setValue(Store.userAgent, forHTTPHeaderField: "User-Agent")
-        do {
-            let (data, _) = try await URLSession.shared.data(for: req)
-            if let loaded = NSImage(data: data) {
-                image = loaded
-                failed = false
-                return
-            }
-        } catch {
-            if Task.isCancelled { return }
+        if let (data, _) = try? await URLSession.shared.data(for: req), let loaded = NSImage(data: data) {
+            image = loaded
+            failures = 0
+            return
         }
-        if image == nil { failed = true }
+        if Task.isCancelled { return }
+        failures += 1
+        guard let delay = Cameras.retryDelay(afterFailures: failures) else {
+            gaveUp = true
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(delay))
+        if Task.isCancelled { return }
+        reloads += 1
+    }
+
+    /// The reload button. Tries now with a new address and starts the retries over.
+    func reload(now: Moment) {
+        newVersion(now)
+        failures = 0
+        gaveUp = false
+        reloads += 1
+    }
+
+    private func newVersion(_ now: Moment) {
+        let v = Cameras.version(now)
+        guard v != version else { return }
+        version = v
+        reloads = 0
+        failures = 0
+        gaveUp = false
     }
 }
 
@@ -823,10 +928,6 @@ private struct TextButton: View {
         .foregroundStyle(Color.accentColor)
         .contentShape(Rectangle())
     }
-}
-
-@MainActor private func open(_ url: String) {
-    if let u = URL(string: url) { NSWorkspace.shared.open(u) }
 }
 
 extension View {

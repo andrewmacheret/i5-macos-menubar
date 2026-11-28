@@ -16,7 +16,7 @@ The data comes from [i5-server-lambdas](https://github.com/andrewmacheret/i5-ser
 Click the icon for details: today's and tomorrow's schedule, travel times, traffic cameras, upcoming changes, planned closures, and links to live sources.
 
 <p>
-  <img src="docs/popover-confirmed.png" width="400" alt="Popover showing the lanes confirmed northbound, with travel times and the express lane cameras open">
+  <img src="docs/popover-confirmed.png" width="400" alt="Popover showing the lanes confirmed northbound, with travel times and the express lane cameras open, one shown bigger">
   &nbsp;
   <img src="docs/popover-cant-confirm.png" width="400" alt="Popover before Thanksgiving showing a warning that the status can't be confirmed, with links to live sources">
 </p>
@@ -46,7 +46,7 @@ The sections follow the [web version](https://andrewmacheret.com/projects/i5/), 
 - **Notices:** what WSDOT says about today, each with a More info link.
 - **Timelines:** colored bars for today and tomorrow, with a marker for the current time. Hours the server isn't sure about are striped.
 - **Travel times:** Seattle ↔ Everett in the express lanes and the regular lanes, from WSDOT's sensors, with how much the express lanes save and the usual time. Hidden when the reading is more than 30 minutes old.
-- **Cameras:** closed until you open it. Shows the express lane cameras first, with a button for every camera along I-5 in Seattle. Each picture has its milepost and a map link, refreshes every 5 minutes while open, and opens full size in your browser when clicked.
+- **Cameras:** closed until you open it. Shows the express lane cameras first, with a button for every camera along I-5 in Seattle, and a link to all cameras on WSDOT's travel map. Each picture has its milepost, a map link and a reload button, and refreshes every 5 minutes while open. A picture that doesn't load is tried again after 5, 15 and 45 seconds, then says "Picture didn't load". Click a picture to show it bigger across the popover, with a link to open it in your browser. Click it again to shrink it.
 - **Coming up:** the next four changes with countdowns. A ⚠ marks days that may not go as planned.
 - **Planned changes:** closures and early closings in the next two weeks, each as a list of times (20 shown, then "…" for the rest), with WSDOT's own words and a More info link.
 - **Regular schedule and sources:** the weekly schedule as posted, and links to every page the data comes from.
